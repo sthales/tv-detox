@@ -102,6 +102,8 @@ public class MainActivity extends Activity {
             "com.android.tv.settings.device.displaysound.DisplaySoundActivity"};
     // Wallpaper images, pushed by wallpaper.sh. The saved wallpaper is IMAGE + file name.
     private static final String IMAGES = "/sdcard/Pictures/tvhome", IMAGE = "image:";
+    // Custom tile pictures, pushed by banner.sh as BANNERS/<package>.png (or .jpg, .webp).
+    private static final String BANNERS = IMAGES + "/banners";
     // Wallpapers, saved by name: a gradient top to bottom, then a glow from the top left and one from
     // the bottom right. Dark ones first, then bright ones that get darker towards the bottom, so the
     // white labels stay easy to read. Only colours, no images, so every one costs the same as Dusk,
@@ -133,6 +135,10 @@ public class MainActivity extends Activity {
     private final android.util.LruCache<String, Bitmap> decoded = new android.util.LruCache<>(2);
     private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
     private Runnable pendingPreview;
+    // Pictures are decoded here, off the main thread: a 5K PNG takes seconds on this chip.
+    private static final java.util.concurrent.ExecutorService decoder = java.util.concurrent.Executors.newSingleThreadExecutor();
+    private static final java.util.Map<String, Drawable> thumbs = new java.util.HashMap<>();
+    private String previewing; // the wallpaper the list is on, so a late decode for another is dropped
     // Back on the home hides the page and leaves the wallpaper and a small clock; any key brings it back.
     private boolean ambient;
     private FrameLayout ambientClock;
@@ -269,7 +275,9 @@ public class MainActivity extends Activity {
         String keys = intent == null ? null : intent.getStringExtra("keys");
         String wall = intent == null ? null : intent.getStringExtra("wallpaper");
         String hidden = intent == null ? null : intent.getStringExtra("hidden_inputs");
-        if (apps == null && quick == null && keys == null && wall == null && hidden == null) return false;
+        // banner.sh only needs the tiles redrawn; the picture itself is the file.
+        String banner = intent == null ? null : intent.getStringExtra("banner");
+        if (apps == null && quick == null && keys == null && wall == null && hidden == null && banner == null) return false;
         SharedPreferences prefs = getSharedPreferences(PREFS, 0);
         String stamp = intent.getStringExtra("stamp");
         if (stamp != null && stamp.equals(prefs.getString("stamp", null))) return false;
@@ -495,19 +503,17 @@ public class MainActivity extends Activity {
     }
 
     // The wallpapers, each with a small dot of its colours or of the picture. Moving through the list
-    // shows each one behind the panel; OK keeps it, Back goes back to the one before.
+    // shows each one behind the panel; OK keeps it, Back goes back to the one before. Picture dots and
+    // previews are decoded in the background, and dots are kept on disk, so the list opens at once.
     private void showWallpapers() {
         final int size = px(40);
         final List<String> names = wallpapers();
         List<String> labels = new ArrayList<>();
         for (String n : names) labels.add(n.startsWith(IMAGE) ? n.substring(IMAGE.length()) : n);
-        panel(Strings.t("Wallpaper"), labels, pos -> {
+        final BaseAdapter[] list = new BaseAdapter[1];
+        list[0] = panel(Strings.t("Wallpaper"), labels, pos -> {
             String n = names.get(pos);
-            if (n.startsWith(IMAGE)) {
-                Bitmap b = crop(new File(IMAGES, n.substring(IMAGE.length())), size, size);
-                if (b == null) return new ColorDrawable(Color.TRANSPARENT);
-                return new BitmapDrawable(getResources(), b);
-            }
+            if (n.startsWith(IMAGE)) return thumb(new File(IMAGES, n.substring(IMAGE.length())), size, list);
             int[] c = WALLPAPERS[pos];
             GradientDrawable dot = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                     new int[] {glow(c[3], c[0]), c[1], glow(c[4], c[0])});
@@ -518,13 +524,62 @@ public class MainActivity extends Activity {
         }, size, Math.max(0, names.indexOf(wallpaper())), pos -> {
             // Wait for the arrows to settle, so holding one doesn't decode every picture it passes.
             ui.removeCallbacks(pendingPreview);
-            pendingPreview = () -> showWallpaper(names.get(pos));
+            previewing = names.get(pos);
+            pendingPreview = () -> preview(names.get(pos));
             ui.postDelayed(pendingPreview, 150);
         }, which -> {
             ui.removeCallbacks(pendingPreview);
+            previewing = null;
             getSharedPreferences(PREFS, 0).edit().putString("wallpaper", names.get(which)).apply();
             showWallpaper(names.get(which));
+        }, null);
+    }
+
+    // Shows a wallpaper from the list: gradients and decoded pictures at once, others once decoded.
+    private void preview(final String name) {
+        if (!name.startsWith(IMAGE) || decoded.get(imageKey(name)) != null) {
+            showWallpaper(name);
+            return;
+        }
+        final int w = getResources().getDisplayMetrics().widthPixels, h = getResources().getDisplayMetrics().heightPixels;
+        final File f = new File(IMAGES, name.substring(IMAGE.length()));
+        decoder.execute(() -> {
+            Bitmap b = crop(f, w, h);
+            ui.post(() -> {
+                if (b != null) decoded.put(imageKey(name), b);
+                if (name.equals(previewing)) showWallpaper(name);
+            });
         });
+    }
+
+    private String imageKey(String name) {
+        File f = new File(IMAGES, name.substring(IMAGE.length()));
+        return f.getPath() + "@" + f.lastModified();
+    }
+
+    // A picture's dot for the list: from memory, else from the disk cache, else decoded in the
+    // background (then saved) while the row shows nothing; the list redraws when it's ready.
+    private Drawable thumb(final File f, final int size, final BaseAdapter[] list) {
+        final String key = f.getName() + "@" + f.lastModified() + "@" + size;
+        synchronized (thumbs) {
+            if (thumbs.containsKey(key)) return thumbs.get(key);
+            thumbs.put(key, null);
+        }
+        final File cached = new File(getCacheDir(), "thumbs/" + Integer.toHexString(key.hashCode()) + ".png");
+        decoder.execute(() -> {
+            Bitmap b = cached.exists() ? BitmapFactory.decodeFile(cached.getPath()) : null;
+            if (b == null) {
+                b = crop(f, size, size);
+                cached.getParentFile().mkdirs();
+                if (b != null) try (java.io.FileOutputStream out = new java.io.FileOutputStream(cached)) {
+                    b.compress(Bitmap.CompressFormat.PNG, 100, out);
+                } catch (Exception ignored) {}
+            }
+            final Drawable d = b == null ? new ColorDrawable(Color.TRANSPARENT) : new BitmapDrawable(getResources(), b);
+            synchronized (thumbs) { thumbs.put(key, d); }
+            ui.post(() -> { if (list[0] != null) list[0].notifyDataSetChanged(); });
+        });
+        return null;
     }
 
     // A glow colour made solid over the base, three times as strong, so a small dot shows it.
@@ -578,11 +633,17 @@ public class MainActivity extends Activity {
         ((FrameLayout.LayoutParams) moveHint.getLayoutParams()).topMargin = gridTop - px(64);
         root.setMinimumHeight(bottomTop + h + px(MARGIN));
 
+        String[] banners = new File(BANNERS).list();
         for (String pkg : apps) {
             Intent li = launchIntent(pm, pkg);
             if (li == null) continue;
             Drawable banner = null;
-            try {
+            String custom = Config.bannerFile(pkg, banners);
+            if (custom != null) {
+                Bitmap b = crop(new File(BANNERS, custom), w, h);
+                if (b != null) banner = new BitmapDrawable(getResources(), b);
+            }
+            if (banner == null) try {
                 banner = pm.getActivityBanner(li);
                 if (banner == null) banner = pm.getApplicationBanner(pkg);
             } catch (Exception ignored) {}
@@ -607,7 +668,7 @@ public class MainActivity extends Activity {
         for (TvInputInfo in : inputs)
             addTile(root, in.getId(), inputLabel(in), null, LineIcon.HDMI, null, m + col++ * (w + g), bottomTop, w, h);
         addTile(root, SETTINGS, Strings.t("Settings"), null, LineIcon.SETTINGS, null, m + col++ * (w + g), bottomTop, w, h);
-        addTile(root, ADD, Strings.t("Add app"), null, LineIcon.PLUS, null, m + col * (w + g), bottomTop, w, h);
+        addTile(root, ADD, Strings.t("Apps"), null, LineIcon.APPS, null, m + col * (w + g), bottomTop, w, h);
 
         // Plain icons at the top right, level with the date: any settings shortcuts picked, then the
         // network icon. Added last, so the first app keeps first focus; Up from the apps reaches them.
@@ -772,7 +833,7 @@ public class MainActivity extends Activity {
     private void open(String key) {
         Intent i;
         if (ADD.equals(key)) {
-            showAddMenu(-1);
+            showAllApps();
             return;
         } else if (SETTINGS.equals(key)) {
             String[] items = SETTINGS_ITEMS;
@@ -973,13 +1034,31 @@ public class MainActivity extends Activity {
         }
     }
 
+    // One of TCL's own panels (picture, SoundPreset, info). TCL ships the service in com.tcl.settings on
+    // some TVs and inside com.android.tv.settings on others, so it's found by its action. Null if absent.
+    private Intent tclWindow(String type) {
+        List<ResolveInfo> found = getPackageManager().queryIntentServices(new Intent(TCL_SHOW_WINDOW), 0);
+        if (found.isEmpty()) return null;
+        android.content.pm.ServiceInfo s = found.get(0).serviceInfo;
+        return new Intent(TCL_SHOW_WINDOW).setClassName(s.packageName, s.name).putExtra("Type", type);
+    }
+
+    // Info on the home shows TCL's signal panel (resolution, HDR). Apps in front get the key as usual.
+    @Override
+    public boolean onKeyUp(int code, KeyEvent event) {
+        if (code == KeyEvent.KEYCODE_INFO) {
+            Intent info = tclWindow("info");
+            if (info != null) try { startService(info); return true; } catch (Exception ignored) {}
+        }
+        return super.onKeyUp(code, event);
+    }
+
     // Screens a shortcut can open, best first, keeping only those this TV has.
     private List<Intent> quickIntents(String name) {
         List<Intent> all = new ArrayList<>();
         String tclType = name.equals("sound") ? "SoundPreset" : name.equals("picture") ? "picture" : null;
-        if (tclType != null)
-            all.add(new Intent(TCL_SHOW_WINDOW).setClassName("com.tcl.settings", "com.tcl.settings.ShowWindowService")
-                    .putExtra("Type", tclType));
+        Intent tcl = tclType == null ? null : tclWindow(tclType);
+        if (tcl != null) all.add(tcl);
         switch (name) {
             case "bluetooth":
                 all.add(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
@@ -1033,15 +1112,15 @@ public class MainActivity extends Activity {
     interface Icon { Drawable at(int which) throws Exception; }
 
     private void panel(String title, List<String> labels, Pick pick) {
-        panel(title, labels, null, 0, -1, null, pick);
+        panel(title, labels, null, 0, -1, null, pick, null);
     }
 
     // A side panel in the home screen's own look: a title, then one row per choice, with the same
     // glass focus as the tiles. Back closes it. icon (or null) puts an icon of that size by each name.
     // With preview, the list starts on selected and moving through it calls preview; Back calls it
-    // with selected again, to put things back.
-    private void panel(String title, final List<String> labels, final Icon icon, final int size,
-                       final int selected, final Pick preview, final Pick pick) {
+    // with selected again, to put things back. With hold, holding OK (or Menu) on a row calls it.
+    private BaseAdapter panel(String title, final List<String> labels, final Icon icon, final int size,
+                       final int selected, final Pick preview, final Pick pick, final Pick hold) {
         final Dialog d = new Dialog(this, android.R.style.Theme_Material_Dialog_NoActionBar);
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -1064,7 +1143,7 @@ public class MainActivity extends Activity {
         list.setSelector(focus);
         // Icons load as rows appear, drawn small to save RAM.
         final Drawable[] icons = new Drawable[labels.size()];
-        list.setAdapter(new BaseAdapter() {
+        BaseAdapter adapter = new BaseAdapter() {
             @Override public int getCount() { return labels.size(); }
             @Override public Object getItem(int pos) { return labels.get(pos); }
             @Override public long getItemId(int pos) { return pos; }
@@ -1076,20 +1155,46 @@ public class MainActivity extends Activity {
                 t.setGravity(Gravity.CENTER_VERTICAL);
                 t.setMinHeight(px(88));
                 t.setPadding(px(24), 0, px(24), 0);
+                // An icon that isn't ready yet (null) is asked for again on the next redraw.
+                Drawable shown = null;
                 if (icon != null && icons[pos] == null) {
                     try { icons[pos] = icon.at(pos); }
                     catch (Exception e) { icons[pos] = new ColorDrawable(Color.TRANSPARENT); }
-                    icons[pos].setBounds(0, 0, size, size);
+                    if (icons[pos] != null) icons[pos].setBounds(0, 0, size, size);
                 }
-                t.setCompoundDrawablesRelative(icons[pos], null, null, null);
+                if (icon != null) {
+                    shown = icons[pos];
+                    if (shown == null) {
+                        shown = new ColorDrawable(Color.TRANSPARENT);
+                        shown.setBounds(0, 0, size, size);
+                    }
+                }
+                t.setCompoundDrawablesRelative(shown, null, null, null);
                 t.setCompoundDrawablePadding(px(24));
                 return t;
             }
-        });
+        };
+        list.setAdapter(adapter);
         list.setOnItemClickListener((parent, v, pos, id) -> {
             d.dismiss();
             pick.at(pos);
         });
+        if (hold != null) {
+            list.setOnItemLongClickListener((parent, v, pos, id) -> {
+                d.dismiss();
+                hold.at(pos);
+                return true;
+            });
+            list.setOnKeyListener((v, code, ev) -> {
+                if (code != KeyEvent.KEYCODE_MENU) return false;
+                int pos = list.getSelectedItemPosition();
+                if (ev.getAction() == KeyEvent.ACTION_UP && pos >= 0) {
+                    d.dismiss();
+                    hold.at(pos);
+                }
+                return true;
+            });
+        }
         if (preview != null) {
             list.setSelection(selected);
             list.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener() {
@@ -1111,6 +1216,7 @@ public class MainActivity extends Activity {
         w.setGravity(Gravity.END);
         w.setDimAmount(preview != null ? 0f : 0.5f); // a preview needs the home screen undimmed
         d.show();
+        return adapter;
     }
 
     // A small menu that drops down under a tile, in the same glass as the tiles. Opens above the
@@ -1199,21 +1305,54 @@ public class MainActivity extends Activity {
         });
     }
 
-    // Every launchable app that isn't on the top row yet, by name. The pick is added at the end,
-    // or takes the place of the app at replaceIndex (-1 to add).
-    private void showAddMenu(final int replaceIndex) {
-        final PackageManager pm = getPackageManager();
+    // Every launchable app by name, label -> package, leaving out the apps on the home if skipRow.
+    private TreeMap<String, String> allApps(boolean skipRow) {
+        PackageManager pm = getPackageManager();
         TreeMap<String, String> byLabel = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         for (String category : new String[] {Intent.CATEGORY_LEANBACK_LAUNCHER, Intent.CATEGORY_LAUNCHER}) {
             Intent q = new Intent(Intent.ACTION_MAIN).addCategory(category);
             for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
                 String p = ri.activityInfo.packageName;
-                if (rowApps.contains(p) || byLabel.containsValue(p) || p.equals(getPackageName())
+                if ((skipRow && rowApps.contains(p)) || byLabel.containsValue(p) || p.equals(getPackageName())
                         || (NOT_APPS.contains(p) && !p.equals(PLAY_STORE))) continue;
                 String label = labelOf(p);
                 if (!byLabel.containsKey(label)) byLabel.put(label, p);
             }
         }
+        return byLabel;
+    }
+
+    // The Apps tile: every app, to open without adding it to the home. Hold OK (or Menu) on one to
+    // add it to the home, take it off, or see its info.
+    private void showAllApps() {
+        final PackageManager pm = getPackageManager();
+        TreeMap<String, String> byLabel = allApps(false);
+        final List<String> pkgs = new ArrayList<>(byLabel.values());
+        panel(Strings.t("Apps"), new ArrayList<>(byLabel.keySet()), pos -> fit(pm.getApplicationIcon(pkgs.get(pos)), px(48), px(48)),
+                px(48), -1, null, which -> open(pkgs.get(which)), which -> {
+            final String pkg = pkgs.get(which);
+            final boolean onHome = rowApps.contains(pkg);
+            panel(labelOf(pkg), java.util.Arrays.asList(Strings.t(onHome ? "Remove from home" : "Add to home"),
+                    Strings.t("App info")), choice -> {
+                if (choice == 1) {
+                    try { startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + pkg))); }
+                    catch (Exception ignored) {}
+                    return;
+                }
+                if (onHome) rowApps.remove(pkg);
+                else rowApps.add(pkg);
+                saveRow();
+                focusedKey = onHome ? ADD : pkg;
+                buildTiles();
+            });
+        });
+    }
+
+    // Every launchable app that isn't on the top row yet, by name. The pick takes the place of the app
+    // at replaceIndex, or is added at the end (-1).
+    private void showAddMenu(final int replaceIndex) {
+        final PackageManager pm = getPackageManager();
+        TreeMap<String, String> byLabel = allApps(true);
         if (byLabel.isEmpty()) {
             panel(Strings.t("Every app is already here"), Collections.singletonList("OK"), which -> {});
             return;
@@ -1228,7 +1367,7 @@ public class MainActivity extends Activity {
             saveRow();
             focusedKey = pkgs.get(which);
             buildTiles();
-        });
+        }, null);
     }
 
     private String labelOf(String pkg) {

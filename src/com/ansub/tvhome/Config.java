@@ -59,4 +59,14 @@ final class Config {
         for (String part : s) b.append(b.length() == 0 ? "" : ",").append(part);
         return b.toString();
     }
+
+    // The custom banner for pkg among the files in the banners folder: "<pkg>.<picture extension>".
+    static String bannerFile(String pkg, String[] files) {
+        if (files == null) return null;
+        for (String f : files) {
+            int dot = f.lastIndexOf('.');
+            if (dot > 0 && f.substring(0, dot).equals(pkg) && isImage(f)) return f;
+        }
+        return null;
+    }
 }

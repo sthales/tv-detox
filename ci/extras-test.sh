@@ -2,7 +2,7 @@
 # Checks the fork's additions on a TV that already runs this home. Unlike smoke-test.sh it never
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
-# Sections run in order: baseline keys wallpaper ambient bell hdmi boot. Name one to run only that.
+# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info. Name one to run only that.
 # The enabled accessibility services and the wallpaper are put back afterwards. The key map is reset to
 # extras.sh's default and hidden HDMI inputs are shown again (the app's settings can't be read from adb).
 #   sh ci/extras-test.sh <TV> postboot   right after a real restart, before any script: checks only
@@ -149,7 +149,7 @@ t_hdmi() {
   hide "${P}15,${P}16,${P}17,${P}18,bogus/id" 3
   [ "$(tiles)" -eq "$none_shown" ] || fail "an unknown hidden id changed the layout"
   ui | grep -q 'text="Settings"' || fail "Settings gone with every input hidden"
-  ui | grep -q 'text="Add app"' || fail "Add app gone with every input hidden"
+  ui | grep -q 'text="Apps"' || fail "Apps tile gone with every input hidden"
   hide none 4
   [ "$(tiles)" -eq "$all0" ] || fail "'none' didn't bring the inputs back"
 }
@@ -168,6 +168,69 @@ t_boot() {
   a11y | tr ':' '\n' | grep -qxF "$OTHER" || fail "healing dropped another service: $(a11y)"
 }
 
+# The text of the focused tile or row (its own text, or its first child's).
+focused() {
+  ui | python3 -c 'import sys,xml.etree.ElementTree as E
+r=E.fromstring(sys.stdin.read().split("?>",1)[-1])
+for n in r.iter("node"):
+  if n.get("focused")=="true":
+    t=[m.get("text") for m in n.iter("node") if m.get("text")]
+    print(t[0] if t else ""); break'
+}
+
+# Bottom row, then right until the Apps tile has focus.
+to_apps() {
+  home
+  for _ in 1 2 3; do sh_tv input keyevent KEYCODE_DPAD_DOWN; done
+  for _ in 1 2 3 4 5 6 7; do [ "$(focused)" = Apps ] && return 0; sh_tv input keyevent KEYCODE_DPAD_RIGHT; done
+  [ "$(focused)" = Apps ] || fail "couldn't reach the Apps tile"
+}
+
+t_apps() {
+  to_apps
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 2
+  ui | grep -q 'text="Apps"' || fail "Apps panel didn't open"
+  ui | grep -q 'text="Disney+"' || fail "Apps panel doesn't list an app that isn't on the home (Disney+)"
+  sh_tv input keyevent --longpress KEYCODE_DPAD_CENTER; sleep 2
+  ui | grep -qE 'text="(Add to home|Remove from home)"' || fail "hold OK on an app didn't open its menu"
+  ui | grep -q 'text="App info"' || fail "app menu has no App info"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  focus | grep -q $ME || fail "Back from the app menu left the home"
+}
+
+# How many pixels of the screen are pure green (the test banner's colour).
+green() {
+  adb -s "$TV" exec-out screencap | python3 -c 'import sys,struct
+d=sys.stdin.buffer.read(); w,h=struct.unpack("<II",d[:8]); px=d[len(d)-w*h*4:]
+print(sum(1 for i in range(0,len(px),16) if px[i]<40 and px[i+1]>215 and px[i+2]<40)*4)'
+}
+
+t_banner() {
+  tmp=$(mktemp -d)
+  python3 -c 'import sys,zlib,struct
+w,h=640,360
+c=lambda t,d:struct.pack(">I",len(d))+t+d+struct.pack(">I",zlib.crc32(t+d))
+raw=b"".join(b"\0"+b"\x00\xff\x00"*w for _ in range(h))
+sys.stdout.buffer.write(b"\x89PNG\r\n\x1a\n"+c(b"IHDR",struct.pack(">IIBBBBB",w,h,8,2,0,0,0))+c(b"IDAT",zlib.compress(raw))+c(b"IEND",b""))' > "$tmp/b.png"
+  sh banner.sh "$TV" "$tmp/b.png" com.google.android.youtube.tv >/dev/null || fail "banner.sh failed"
+  home; sleep 2
+  [ "$(green)" -gt 20000 ] || fail "the custom banner isn't on screen"
+  sh banner.sh "$TV" --reset com.google.android.youtube.tv >/dev/null
+  home; sleep 2
+  [ "$(green)" -lt 2000 ] || fail "--reset didn't bring back YouTube's own banner"
+  sh banner.sh "$TV" "$tmp/b.png" com.not.installed >/dev/null 2>&1 && fail "banner.sh accepted an app that isn't installed"
+  sh banner.sh "$TV" "$tmp/b.png" 'x;rm' >/dev/null 2>&1 && fail "banner.sh accepted a bad package name"
+  rm -rf "$tmp"
+}
+
+# Info on the home opens TCL's signal panel (a TV Settings window over the home).
+t_info() {
+  home
+  sh_tv input keyevent KEYCODE_INFO; sleep 3
+  sh_tv dumpsys window | grep -E 'mCurrentFocus|Window #' | grep -q 'com.android.tv.settings' || fail "Info on the home opened no TCL panel"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+}
+
 # Right after a real restart: the remap service and the bell must be back on their own.
 t_postboot() {
   a11y | grep -q "com.ansub.tvhome/" || fail "KeyService not enabled after the restart: $(a11y)"
@@ -180,7 +243,7 @@ if [ "$ONLY" = postboot ]; then echo "== postboot"; t_postboot; echo PASS; exit 
 saved=$(a11y)
 trap 'sh_tv "settings put secure $A11Y '"'"'$saved'"'"'" >/dev/null 2>&1' EXIT
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi boot; do
+for t in baseline keys wallpaper ambient bell hdmi boot apps banner info; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"

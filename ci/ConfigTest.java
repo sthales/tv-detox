@@ -11,6 +11,7 @@ public class ConfigTest {
         setsRoundTripWithoutDuplicates();
         parseKeysRefusesNavigationAndSystemKeys();
         controllersAreNotRemapped();
+        bannerFileMatchesThePackageOnly();
         System.out.println("OK");
     }
 
@@ -51,5 +52,14 @@ public class ConfigTest {
         assert Config.fromController(0x401);       // SOURCE_GAMEPAD
         assert Config.fromController(0x1000010);   // SOURCE_JOYSTICK
         assert Config.fromController(0x501);       // keyboard | gamepad, how many pads report
+    }
+
+    static void bannerFileMatchesThePackageOnly() {
+        String[] files = {"com.netflix.ninja.png", "com.stremio.one.JPG", "com.stremio.one.ninja.png", "notes.txt"};
+        assert "com.netflix.ninja.png".equals(Config.bannerFile("com.netflix.ninja", files));
+        assert "com.stremio.one.JPG".equals(Config.bannerFile("com.stremio.one", files));
+        assert Config.bannerFile("com.spotify.tv.android", files) == null;
+        assert Config.bannerFile("com.netflix", files) == null;
+        assert Config.bannerFile("com.netflix.ninja", null) == null;
     }
 }

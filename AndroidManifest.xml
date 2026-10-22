@@ -22,6 +22,7 @@
         <intent><action android:name="android.settings.SOUND_SETTINGS" /></intent>
         <intent><action android:name="android.settings.DISPLAY_SETTINGS" /></intent>
         <package android:name="com.tcl.settings" />
+        <intent><action android:name="com.tcl.settings.SHOW_WINDOW" /></intent>
         <!-- Google TV's HDMI input player, so HDMI tiles can see when the TV sends HDMI to it. -->
         <package android:name="com.google.android.tv.inputplayer" />
     </queries>
