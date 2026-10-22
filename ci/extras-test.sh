@@ -2,7 +2,7 @@
 # Checks the fork's additions on a TV that already runs this home. Unlike smoke-test.sh it never
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
-# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control. Name one to run only that.
+# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control rows. Name one to run only that.
 # The enabled accessibility services and the wallpaper are put back afterwards. The key map is reset to
 # extras.sh's default and hidden HDMI inputs are shown again (the app's settings can't be read from adb).
 #   sh ci/extras-test.sh <TV> postboot   right after a real restart, before any script: checks only
@@ -306,6 +306,21 @@ t_control() {
   sh_tv input keyevent KEYCODE_BACK; sleep 1
 }
 
+# Apple TV rows: the second row only peeks at the bottom edge until Down reveals it; Up hides it again.
+settings_top() {
+  ui | python3 -c 'import sys,re
+x=sys.stdin.read(); m=re.search(r"text=\"Settings\"[^>]*bounds=\"\[\d+,(\d+)\]\[\d+,(\d+)\]", x)
+print(m.group(1) if m else -1)'
+}
+t_rows() {
+  home; sleep 1
+  top=$(settings_top); [ "$top" -ge 980 ] || [ "$top" -lt 0 ] || fail "second row isn't tucked at the bottom (Settings label at y=$top)"
+  sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 1
+  top=$(settings_top); [ "$top" -gt 0 ] && [ "$top" -lt 1000 ] || fail "Down didn't reveal the second row (Settings label at y=$top)"
+  sh_tv input keyevent KEYCODE_DPAD_UP; sleep 1
+  top=$(settings_top); [ "$top" -ge 980 ] || [ "$top" -lt 0 ] || fail "Up didn't tuck the second row away (Settings label at y=$top)"
+}
+
 # Right after a real restart: the remap service and the bell must be back on their own.
 t_postboot() {
   a11y | grep -q "com.ansub.tvhome/" || fail "KeyService not enabled after the restart: $(a11y)"
@@ -318,7 +333,7 @@ if [ "$ONLY" = postboot ]; then echo "== postboot"; t_postboot; echo PASS; exit 
 saved=$(a11y)
 trap 'sh_tv "settings put secure $A11Y '"'"'$saved'"'"'" >/dev/null 2>&1' EXIT
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control; do
+for t in baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control rows; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"

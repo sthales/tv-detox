@@ -83,8 +83,10 @@ public class MainActivity extends Activity {
 
     // Layout is designed at 1920x1080 and scaled to the TV's real UI size by px().
     private static final int MARGIN = 96, GAP = 36, RADIUS = 22;
-    private static final int ROW1_TOP = 604, ROW_STEP = 224;
-    private static final int GRID_MIN_TOP = 400; // more rows push the grid up, but not into the clock
+    // Apple TV style: the apps sit low and the second row only peeks at the bottom edge (40 px of
+    // 1080) until Down reveals it.
+    private static final int ROW1_TOP = 816, ROW_STEP = 224;
+    private static final int GRID_MIN_TOP = 400; // more rows push the grid up, but not into the chip
     private static final int ICON_TOP = 76; // the chip's top
 
     // The Settings tile opens a small menu: the home screen's own settings, then the TV's.
@@ -146,7 +148,7 @@ public class MainActivity extends Activity {
     private boolean ambient;
     private FrameLayout ambientClock;
     private FrameLayout root; // the page, inside a vertical scroller
-    private int tileW, tileH, gridTop; // app grid geometry, set by buildTiles
+    private int tileW, tileH, gridTop, bottomRowTop; // app grid geometry, set by buildTiles
     private final List<View> tiles = new ArrayList<>();
     // Apps with a custom banner: drawn on glass, so a logo with a transparent background floats on it.
     private final java.util.Set<String> glassBanners = new java.util.HashSet<>();
@@ -747,6 +749,7 @@ public class MainActivity extends Activity {
         int rows = Math.max(1, (launchable + PER_ROW - 1) / PER_ROW);
         gridTop = Math.max(px(GRID_MIN_TOP), px(ROW1_TOP) - (rows - 1) * px(ROW_STEP));
         int bottomTop = gridTop + rows * px(ROW_STEP);
+        bottomRowTop = bottomTop;
         ((FrameLayout.LayoutParams) moveHint.getLayoutParams()).topMargin = gridTop - px(64);
         root.setMinimumHeight(bottomTop + h + px(MARGIN));
 
@@ -857,7 +860,10 @@ public class MainActivity extends Activity {
 
         final boolean glass = banner == null || glassBanners.contains(key);
         card.setOnFocusChangeListener((v, has) -> {
-            if (has) focusedKey = key;
+            if (has) {
+                focusedKey = key;
+                reveal(y >= bottomRowTop);
+            }
             if (glass) bg.setColor(has ? 0x38FFFFFF : 0x13FFFFFF);
             v.animate().scaleX(has ? 1.1f : 1f).scaleY(has ? 1.1f : 1f).translationZ(has ? px(26) : 0)
                     .setDuration(140).withLayer().start();
@@ -1012,6 +1018,13 @@ public class MainActivity extends Activity {
         tile.setContentDescription(Strings.t("Notifications") + " " + count + (unseen ? " new" : ""));
     }
 
+    // Glides the page so the bottom row shows (focus is on it) or tucks it back to a peek.
+    private void reveal(boolean bottomRow) {
+        if (scroller == null) return;
+        int max = Math.max(0, root.getHeight() - scroller.getHeight());
+        scroller.smoothScrollTo(0, bottomRow ? max : 0);
+    }
+
     // --es open control (the cog from inside another app, through KeyService): show Control Center.
     private void openFrom(Intent intent) {
         if (intent == null || !"control".equals(intent.getStringExtra("open"))) return;
@@ -1040,7 +1053,10 @@ public class MainActivity extends Activity {
         chip.setTag(CHIP);
         chip.setContentDescription("chip");
         chip.setOnFocusChangeListener((v, has) -> {
-            if (has) focusedKey = CHIP;
+            if (has) {
+                focusedKey = CHIP;
+                reveal(false);
+            }
             bg.setColor(has ? 0x52FFFFFF : 0x24FFFFFF);
             v.animate().scaleX(has ? 1.08f : 1f).scaleY(has ? 1.08f : 1f).setDuration(140).withLayer().start();
         });
