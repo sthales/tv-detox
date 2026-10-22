@@ -384,7 +384,7 @@ Use the remote. Hold **OK** on an app (or press **Menu**) to:
 - **Uninstall** it, for apps you installed yourself. The TV asks you to confirm first.
 - **App info**, for apps that came with the TV. They can't be uninstalled, but from there you can turn them off.
 
-To add an app, pick the **Add app** tile in the bottom row. Add as many apps as you like: they wrap into rows of six, and the page scrolls once there are more than twelve. Your changes are kept until you run `install.sh` with a new app list.
+To add an app, pick the **Add app** tile in the bottom row (in this fork it's called **Apps**: it lists every app, and holding OK on one adds it to the home). Add as many apps as you like: they wrap into rows of six, and the page scrolls once there are more than twelve. Your changes are kept until you run `install.sh` with a new app list.
 
 </details>
 
@@ -399,6 +399,8 @@ Yes. Pick the **Settings** tile, then **Wallpaper**. (**TV settings**, right und
 <details>
 <summary><b>Can I get Wi-Fi and Bluetooth one press away?</b></summary>
 <br>
+
+*In this fork, Wi-Fi, Bluetooth, Sound and Picture live in Control Center (cog button), and the `install.sh` shortcuts argument below is ignored. See [Fork additions](#fork-additions).*
 
 Yes. A small network icon always sits next to the clock. It shows **Wi-Fi** (with signal bars), **Ethernet** or a crossed-out Wi-Fi when you're offline, and opens your network settings. **Bluetooth**, **Sound** and **Picture** shortcuts can join it. They're off unless you ask for them:
 
@@ -472,21 +474,76 @@ It's one screen of plain Java, no libraries, no Gradle. The background is drawn 
 
 ## Fork additions
 
-This fork adds a few things on top of the home screen. Run `extras.sh` once after every install.
+This fork (`sthales/tv-detox`) turns the home screen into an Apple TV-style home for a gaming room: built and tested on a TCL Smart TV Pro (Google TV 14). Everything below is optional and reversible. Run `extras.sh` once after every install.
 
 ```sh
-sh extras.sh <TV_IP>                       # remote buttons + notification bell
-sh extras.sh <TV_IP> "4020:com.stremio.one" # your own key code:package list
-sh wallpaper.sh <TV_IP> my-art.jpg         # a picture as the wallpaper
+sh extras.sh <TV_IP>                              # remote buttons, notifications, TCL fixes
+sh extras.sh <TV_IP> "4020:com.stremio.one"       # your own key code:target list ("" turns the remap off)
+sh wallpaper.sh <TV_IP> my-art.jpg                # a picture as the wallpaper (JPG, PNG, WebP)
+sh banner.sh <TV_IP> logo.png com.stremio.one     # your own picture on an app's tile
+sh banner.sh <TV_IP> --reset com.stremio.one      # back to the app's own banner
+sh avatar.sh <TV_IP> me.jpg                       # your photo in the chip and Control Center
+sh avatar.sh <TV_IP> --name "Thales"              # your name (its initial shows until there's a photo)
 ```
 
-- **Remote buttons that open apps.** By default the TCL button opens Stremio, and Netflix, Prime Video and YouTube work again with Google TV's home turned off (Google TV's home used to launch those three). Uses an accessibility service, so only the listed keys are touched.
-- **Picture wallpapers.** Pictures pushed with `wallpaper.sh` show up in Settings > Wallpaper after the gradients, with a dark fade so the clock and labels stay readable.
-- **Ambient view.** Back on the home hides the apps and leaves the wallpaper and a small clock. Any button brings them back.
-- **Notification bell.** Next to the network icon, with a dot for new notifications. OK opens the list; pick one to open it, or Clear all.
-- **Hide HDMI tiles.** Hold OK on an HDMI tile and pick Hide. Settings > Show hidden inputs brings them back.
+### The home
 
-Checks: `sh ci/unit-test.sh` and `sh ci/extras-test.sh <TV_IP>`. Unlike `ci/smoke-test.sh`, these never run `undo.sh`, so they are safe on a real TV.
+- **Apple TV-style top.** No big clock and no icon row: one glass **chip** at the top right with the time and your avatar. OK on it opens Control Center.
+- **Control Center.** The **cog button** on the remote (from anywhere) or OK on the chip opens a frosted panel on the right. It shows:
+  - you, the full date and the time
+  - **Wi-Fi**, **Bluetooth**, **Sound**, **Picture** (TCL's own panels), **Inputs** (TCL's input picker), **Screensaver**, **Alerts** (your notification count), **Wallpaper**, **Settings** and **Apps**
+  - the latest notification
+
+  Back or the cog closes it. The glass is the wallpaper blurred once, so it costs nothing while you move around.
+- **Apps tile.** The bottom row's last tile lists **every app**: OK opens it; hold OK (or Menu) to add it to the home, take it off, or see its info.
+- **Custom tile pictures.** `banner.sh` puts your own picture on a tile. A logo with a transparent background floats on the same glass as the other tiles, and tile pictures are scaled down in smooth steps so logos stay crisp.
+- **Hide HDMI tiles.** Hold OK on an HDMI tile and pick **Hide**. **Settings > Show hidden inputs** brings them back.
+- **Info button.** Info on the home asks TCL for its signal panel (resolution, HDR). In apps, Info belongs to the app.
+- **Back** on the home hides the apps and leaves the wallpaper and a small clock. Any button brings them back.
+- **Smooth.** Every wallpaper, gradient or picture plus its readability fade, is drawn once into a single bitmap. Full-screen gradients redrawn each frame ran at 32–73 ms a frame on this TV; now it's 10 ms with no dropped frames.
+
+### Wallpapers
+
+- **Your pictures.** `wallpaper.sh` sends a picture to the home's own folder and selects it. Every picture there is listed in **Settings > Wallpaper** after the gradients, with a dark fade so text stays readable. The list loads picture dots in the background, so it opens at once even with 5K images.
+- **Rotation.** The first row of the Wallpaper list sets **Rotate: Off, 30 min, 1 h, 4 h, 12 h, 24 h or 1 week**. Hold OK on any wallpaper to add it to the rotation (marked ↻) or take it out. It only ticks while the home is on screen.
+- **Delete from the TV.** Hold OK on a picture and pick **Delete**; it asks first. Deleting the shown picture falls back to Dusk.
+- **Where things live.** Pictures, tile pictures and the avatar live in `/sdcard/Android/data/com.ansub.tvhome/files/{wallpapers,banners}`. That's the app's own folder, so the home needs no photo permission and can delete there.
+
+### Remote buttons
+
+`extras.sh` turns on an accessibility service that only touches the keys in its map:
+
+| Button | Key | Opens |
+|---|---|---|
+| TCL | 4020 | Stremio |
+| Netflix | 4062 | Netflix |
+| Prime Video | 4099 | Prime Video |
+| YouTube | 190 | YouTube |
+| TV | 4001 | Live TV (TCL's app, on its last source) |
+| Cog | 83 | Control Center (`@control`) |
+
+- **Why some buttons need this:** Netflix, Prime Video, YouTube, TV and the cog were handled by Google TV's home, so they stop working once it's turned off. Globoplay and Disney+ are launched by TCL's own firmware and keep working.
+- **Keys the map can never take:** Home, Back, the arrows, OK, volume, power, Menu and the media keys.
+- **Game controllers are ignored**, since a pad's button 3 also sends 190.
+
+### Notifications
+
+- The **Alerts** tile in Control Center counts your notifications and says when a new one arrived. It opens the full list: ongoing ones (AirPlay, debugging) are shown too, OK opens one, and **Clear all** clears what can be cleared.
+
+### TCL notes
+
+- **Turning off Google TV's setup app deletes the Wi-Fi network it saved during first setup.** Have the password ready. Re-entered from Settings, the network belongs to the system and stays.
+- **At boot, TCL's boot manager (`TclAppBoot`) blocks apps without its "Auto Launch" permission from starting services, and the accessibility setting gets wiped.** `extras.sh` allows Auto Launch (`appops set … AUTO_START allow`). As a safety net, the home re-enables its key service and re-binds the notification listener whenever it comes to the front.
+- **Google's screensaver (`dreamx`) can't load or save its settings while Google TV's home is off.** It needs that home's account-mode provider. A replacement screensaver is being built.
+- **The UI is capped at 1920×1080** by the firmware (`config_maxUiWidth`). `wm size` can't raise it without root. Video still plays at 4K.
+
+### Checks
+
+`sh ci/unit-test.sh` (plain Java) and `sh ci/extras-test.sh <TV_IP> [section]`, with sections:
+- `baseline`, `keys`, `wallpaper`, `ambient`, `bell`, `hdmi`, `boot`, `apps`, `banner`, `info`, `perf`, `rotate`, `delete`, `control`
+- `postboot`, a check-only pass for right after a restart
+
+Unlike `ci/smoke-test.sh`, these never run `undo.sh`, so they're safe on a real TV. They put back the wallpaper and accessibility settings they change. The key map and hidden inputs go back to the defaults.
 
 ## Contributing
 
