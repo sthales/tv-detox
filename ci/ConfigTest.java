@@ -78,7 +78,9 @@ public class ConfigTest {
         assert Config.intervalMillis(null) == 0;
         assert Config.intervalMillis("x") == 0;
         assert Config.intervalMillis("-5m") == 0;
-        assert Config.ROTATE_CHOICES.length == 7 && "off".equals(Config.ROTATE_CHOICES[0]) && "1w".equals(Config.ROTATE_CHOICES[6]);
+        assert java.util.Arrays.asList(Config.ROTATE_CHOICES).equals(
+                java.util.Arrays.asList("off", "5m", "10m", "30m", "1h", "4h", "12h", "24h", "1w")) : java.util.Arrays.toString(Config.ROTATE_CHOICES);
+        assert Config.intervalMillis("10m") == 10L * 60 * 1000;
     }
 
     static void rotationCyclesThroughTheChosenOnly() {

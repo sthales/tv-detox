@@ -2,7 +2,7 @@
 # Checks the fork's additions on a TV that already runs this home. Unlike smoke-test.sh it never
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
-# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control rows wallscreen. Name one to run only that.
+# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control rows wallscreen wallmenu. Name one to run only that.
 # The enabled accessibility services and the wallpaper are put back afterwards. The key map is reset to
 # extras.sh's default and hidden HDMI inputs are shown again (the app's settings can't be read from adb).
 #   sh ci/extras-test.sh <TV> postboot   right after a real restart, before any script: checks only
@@ -96,11 +96,11 @@ t_wallpaper() {
 }
 
 ambient_on() { ui | grep -q 'content-desc="ambient"'; }
-apps_on() { ui | grep -q 'text="Settings"'; }
+apps_on() { ui | grep -q 'content-desc="chip"'; } # the page is showing (Settings sits in the peek now)
 
 t_ambient() {
   home
-  apps_on || fail "no Settings tile before Back"
+  apps_on || fail "the home page isn't showing before Back"
   sh_tv input keyevent KEYCODE_BACK; sleep 1
   ambient_on || fail "Back didn't show the ambient view"
   apps_on && fail "apps still showing in the ambient view"
@@ -268,13 +268,44 @@ t_wallscreen() {
   sh_tv am start -n $ME/.MainActivity --es open wallpapers >/dev/null; sleep 3
   x=$(ui)
   echo "$x" | grep -q 'content-desc="wallpaper-screen"' || fail "open=wallpapers didn't show the Wallpaper screen"
-  for t in Off "30 min" "1 hour" "1 week" "Set as wallpaper"; do echo "$x" | grep -q "text=\"$t" || fail "Wallpaper screen has no '$t'"; done
-  echo "$x" | grep -qE 'text="(In rotation|Add to rotation)' || fail "no rotation button"
+  for t in Off "5 min" "10 min" "30 min" "1 hour" "1 week"; do echo "$x" | grep -q "text=\"$t" || fail "Wallpaper screen has no '$t'"; done
   n=$(echo "$x" | grep -o 'content-desc="thumb:' | wc -l | tr -d ' ')
   [ "$n" -ge 10 ] || fail "only $n thumbnails"
   sh_tv input keyevent KEYCODE_BACK; sleep 1
   ui | grep -q 'content-desc="wallpaper-screen"' && fail "Back didn't close the Wallpaper screen"
   true
+}
+
+# The real flow, with arrows from the first row: OK on a thumbnail opens its menu, Add to rotation
+# puts ↻ on that same thumbnail.
+focused_thumb() {
+  ui | python3 -c 'import sys,xml.etree.ElementTree as E
+r=E.fromstring(sys.stdin.read().split("?>",1)[-1])
+for n in r.iter("node"):
+  if n.get("focused")=="true" and n.get("content-desc","").startswith("thumb:"):
+    print(n.get("content-desc")[6:]); break'
+}
+badge_of() {
+  ui | python3 -c 'import sys,xml.etree.ElementTree as E
+r=E.fromstring(sys.stdin.read().split("?>",1)[-1])
+for n in r.iter("node"):
+  if n.get("content-desc")=="thumb:"+sys.argv[1]:
+    print(" ".join(m.get("text","") for m in n.iter("node") if m.get("text"))); break' "$1"
+}
+t_wallmenu() {
+  sh_tv am start -n $ME/.MainActivity --es rotation none --es stamp "wm$(date +%s)" >/dev/null; sleep 1
+  sh_tv am start -n $ME/.MainActivity --es open wallpapers >/dev/null; sleep 3
+  for _ in 1 2 3 4 5 6 7 8; do sh_tv input keyevent KEYCODE_DPAD_UP; done; sleep 1
+  sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 1
+  t=$(focused_thumb); [ -n "$t" ] || fail "Down from the chips didn't land on a thumbnail"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
+  ui | grep -q 'text="Add to rotation"' || fail "OK on $t didn't open its menu"
+  for _ in 1 2 3; do [ "$(focused)" = "Add to rotation" ] && break; sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 0.5; done
+  [ "$(focused)" = "Add to rotation" ] || fail "couldn't reach Add to rotation"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
+  badge_of "$t" | grep -q '↻' || fail "$t didn't get the rotation mark (badge: '$(badge_of "$t")')"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  sh_tv am start -n $ME/.MainActivity --es rotation none --es stamp "wn$(date +%s)" >/dev/null
 }
 
 # Delete from the TV: open the Wallpaper screen on the picture, Down to Delete, confirm.
@@ -285,10 +316,10 @@ t_delete() {
   home
   sh_tv am start -n $ME/.MainActivity --es open wallpapers >/dev/null; sleep 3
   ui | grep -q 'content-desc="thumb:image:tvhome-del.png' || fail "the pushed picture isn't in the grid"
-  for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(focused)" = Delete ] && break; sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 0.5; done
-  [ "$(focused)" = Delete ] || sh_tv input keyevent KEYCODE_DPAD_RIGHT
-  for _ in 1 2 3; do [ "$(focused)" = Delete ] && break; sh_tv input keyevent KEYCODE_DPAD_RIGHT; sleep 0.5; done
-  [ "$(focused)" = Delete ] || fail "couldn't reach Delete (focused: $(focused))"
+  [ "$(focused_thumb)" = "image:tvhome-del.png" ] || fail "the Wallpaper screen didn't open on the shown picture ($(focused_thumb))"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
+  for _ in 1 2 3 4; do [ "$(focused)" = Delete ] && break; sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 0.5; done
+  [ "$(focused)" = Delete ] || fail "couldn't reach Delete in the picture's menu (focused: $(focused))"
   sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 2
   ui | grep -q 'Delete tvhome-del.png?' || fail "Delete didn't ask to confirm"
   sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 2
@@ -346,7 +377,7 @@ if [ "$ONLY" = postboot ]; then echo "== postboot"; t_postboot; echo PASS; exit 
 saved=$(a11y)
 trap 'sh_tv "settings put secure $A11Y '"'"'$saved'"'"'" >/dev/null 2>&1' EXIT
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control rows wallscreen; do
+for t in baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control rows wallscreen wallmenu; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"

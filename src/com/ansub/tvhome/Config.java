@@ -72,7 +72,7 @@ final class Config {
 
     // Wallpaper rotation: the choices offered on the TV, as "<number><s|m|h|w>"; "off" or anything
     // else that doesn't parse means no rotation.
-    static final String[] ROTATE_CHOICES = {"off", "30m", "1h", "4h", "12h", "24h", "1w"};
+    static final String[] ROTATE_CHOICES = {"off", "5m", "10m", "30m", "1h", "4h", "12h", "24h", "1w"};
 
     static long intervalMillis(String s) {
         if (s == null || s.length() < 2) return 0;
