@@ -2,7 +2,7 @@
 # Checks the fork's additions on a TV that already runs this home. Unlike smoke-test.sh it never
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
-# Sections run in order: baseline keys wallpaper ambient bell hdmi. Name one to run only that.
+# Sections run in order: baseline keys wallpaper ambient bell hdmi boot. Name one to run only that.
 set -e
 cd "$(dirname "$0")/.."
 TV="$1"; ONLY="$2"
@@ -136,8 +136,21 @@ t_hdmi() {
   [ "$(tiles)" -eq "$all0" ] || fail "'none' didn't bring the inputs back"
 }
 
+# At boot this TCL wipes the accessibility setting and its boot manager won't bind the notification
+# listener, so the home heals both when it starts. This fakes that state without restarting the TV.
+t_boot() {
+  sh extras.sh "$TV" >/dev/null || fail "extras.sh failed"
+  sh_tv settings put secure enabled_accessibility_services null
+  sh_tv settings put secure accessibility_enabled 0
+  sh_tv am force-stop $ME
+  home; sleep 3
+  sh_tv settings get secure enabled_accessibility_services | grep -q "$ME/.KeyService" || fail "home didn't re-enable KeyService"
+  sh_tv dumpsys accessibility | grep "Bound services" | grep -q "label=Home" || fail "KeyService not bound after healing"
+  bell | grep -q 'Notifications' || fail "bell missing after a restart of the home"
+}
+
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi; do
+for t in baseline keys wallpaper ambient bell hdmi boot; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"

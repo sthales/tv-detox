@@ -24,6 +24,8 @@ others=$(sh_tv settings get secure enabled_accessibility_services | tr ':' '\n' 
 sh_tv settings put secure enabled_accessibility_services "${others:-null}"
 sh_tv settings put secure enabled_accessibility_services "${others:+$others:}$SVC"
 sh_tv settings put secure accessibility_enabled 1
+# This TCL wipes the accessibility setting at boot; this lets the home turn the service back on.
+sh_tv pm grant com.ansub.tvhome android.permission.WRITE_SECURE_SETTINGS
 # The bell on the home screen reads notifications.
 sh_tv cmd notification allow_listener com.ansub.tvhome/.NotifService
 

@@ -321,8 +321,35 @@ public class MainActivity extends Activity {
             buildTiles();
         }
         refreshNetwork();
+        healServices();
         View f = getCurrentFocus();
         if (f == null && !tiles.isEmpty()) tiles.get(0).requestFocus();
+    }
+
+    // At boot this TCL wipes the accessibility setting and its boot manager won't bind the bell's
+    // listener. Once the home is running both work again, so it turns them back on here. Writing the
+    // setting needs WRITE_SECURE_SETTINGS, which extras.sh grants; without it this does nothing.
+    private void healServices() {
+        if (NotifService.live == null && android.os.Build.VERSION.SDK_INT >= 24) try {
+            android.service.notification.NotificationListenerService.requestRebind(
+                    new android.content.ComponentName(this, NotifService.class));
+        } catch (Exception ignored) {}
+        String keys = getSharedPreferences(PREFS, 0).getString("keys", null);
+        if (KeyService.live != null || keys == null || keys.trim().isEmpty()) return;
+        android.content.ComponentName me = new android.content.ComponentName(this, KeyService.class);
+        android.content.ContentResolver cr = getContentResolver();
+        String name = Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES;
+        try {
+            StringBuilder others = new StringBuilder();
+            String on = Settings.Secure.getString(cr, name);
+            if (on != null) for (String s : on.split(":")) {
+                android.content.ComponentName c = android.content.ComponentName.unflattenFromString(s);
+                if (c != null && !c.equals(me)) others.append(others.length() == 0 ? "" : ":").append(s);
+            }
+            Settings.Secure.putString(cr, name, others.length() == 0 ? null : others.toString());
+            Settings.Secure.putString(cr, name, (others.length() == 0 ? "" : others + ":") + me.flattenToShortString());
+            Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 1);
+        } catch (SecurityException ignored) {}
     }
 
     // Back from a menu or a window on top (like the uninstall prompt): catch up on apps that changed.

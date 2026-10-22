@@ -29,6 +29,8 @@
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <!-- Wallpaper images pushed by wallpaper.sh into /sdcard/Pictures/tvhome. -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- Lets the home turn its key service back on after this TCL wipes the setting at boot. extras.sh grants it. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
