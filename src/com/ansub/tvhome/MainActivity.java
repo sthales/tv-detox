@@ -1045,10 +1045,14 @@ public class MainActivity extends Activity {
             v.animate().scaleX(has ? 1.08f : 1f).scaleY(has ? 1.08f : 1f).setDuration(140).withLayer().start();
         });
         chip.setOnClickListener(v -> showControlCenter());
+        // In a wrapper like every tile: buildTiles removes each tile's parent from the page.
+        FrameLayout wrap = new FrameLayout(this);
+        wrap.setClipChildren(false);
+        wrap.addView(chip, new FrameLayout.LayoutParams(-2, -2));
         FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
         lp.topMargin = px(ICON_TOP - 6);
         lp.rightMargin = px(MARGIN);
-        root.addView(chip, lp);
+        root.addView(wrap, lp);
         tiles.add(chip);
     }
 

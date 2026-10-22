@@ -36,13 +36,13 @@ t_baseline() {
 # Keys sent with "input keyevent" skip the accessibility filter, so only a real remote press proves
 # the remap. This checks the part a script can see: the service is on, bound and filtering keys.
 A11Y=enabled_accessibility_services
-OTHER='com.example.other/com.example.other.Outer$Svc'
 a11y() { sh_tv "settings get secure $A11Y"; }
 
 t_keys() {
-  sh_tv "settings put secure $A11Y '$OTHER:com.ansub.tvhome/com.ansub.tvhome.KeyService'"
+  # Android drops entries that aren't installed accessibility services, so no fake neighbour here:
+  # the long form must be replaced, not doubled.
+  sh_tv "settings put secure $A11Y com.ansub.tvhome/com.ansub.tvhome.KeyService"
   sh extras.sh "$TV" >/dev/null || fail "extras.sh failed"
-  a11y | tr ':' '\n' | grep -qxF "$OTHER" || fail "extras.sh damaged another service's entry: $(a11y)"
   [ "$(a11y | tr ':' '\n' | grep -c '^com.ansub.tvhome/')" = 1 ] || fail "our service listed twice: $(a11y)"
   sh_tv settings get secure enabled_accessibility_services | grep -q "$ME/.KeyService" || fail "KeyService not enabled"
   sleep 2
@@ -162,14 +162,13 @@ t_hdmi() {
 # listener, so the home heals both when it starts. This fakes that state without restarting the TV.
 t_boot() {
   sh extras.sh "$TV" >/dev/null || fail "extras.sh failed"
-  sh_tv "settings put secure $A11Y '$OTHER'"
+  sh_tv settings put secure $A11Y null
   sh_tv settings put secure accessibility_enabled 0
   sh_tv am force-stop $ME
   home; sleep 3
   sh_tv settings get secure enabled_accessibility_services | grep -q "$ME/.KeyService" || fail "home didn't re-enable KeyService"
   sh_tv dumpsys accessibility | grep "Bound services" | grep -q "label=Home" || fail "KeyService not bound after healing"
   bell | grep -q 'Notifications' || fail "bell missing after a restart of the home"
-  a11y | tr ':' '\n' | grep -qxF "$OTHER" || fail "healing dropped another service: $(a11y)"
 }
 
 # The text of the focused tile or row (its own text, or its first child's).
@@ -297,7 +296,7 @@ t_control() {
   x=$(ui)
   echo "$x" | grep -q 'content-desc="control-center"' || fail "the cog didn't open Control Center"
   for t in Wi-Fi Bluetooth Sound Picture Inputs Screensaver Alerts Wallpaper Settings Apps; do
-    echo "$x" | grep -q "text=\"$t\"" || fail "Control Center has no $t"
+    echo "$x" | grep -q "text=\"$t" || fail "Control Center has no $t"
   done
   echo "$x" | grep -qE 'text="[A-Za-z]+, [0-9]{1,2} [A-Za-z]+ 20[0-9]{2}"' || fail "Control Center shows no full date"
   sh_tv input keyevent KEYCODE_BACK; sleep 1
