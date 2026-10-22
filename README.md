@@ -476,6 +476,17 @@ It's one screen of plain Java, no libraries, no Gradle. The background is drawn 
 
 This fork (`sthales/tv-detox`) turns the home screen into an Apple TV-style home for a gaming room: built and tested on a TCL Smart TV Pro (Google TV 14). Everything below is optional and reversible. Run `extras.sh` once after every install.
 
+<table>
+<tr>
+<td width="50%"><img src="docs/fork-home.jpg" alt="The fork's home: picture wallpaper, logos on glass, the time and avatar chip at the top right"></td>
+<td width="50%"><img src="docs/fork-control-center.jpg" alt="Control Center open over the home: name, full date and time, ten controls and the latest notification"></td>
+</tr>
+<tr>
+<td align="center"><sub>The home: your wallpaper, logos on glass, the chip at the top right, and the second row peeking at the bottom</sub></td>
+<td align="center"><sub>Control Center, opened with the cog button</sub></td>
+</tr>
+</table>
+
 ```sh
 sh extras.sh <TV_IP>                              # remote buttons, notifications, TCL fixes
 sh extras.sh <TV_IP> "4020:com.stremio.one"       # your own key code:target list ("" turns the remap off)
@@ -499,6 +510,7 @@ sh avatar.sh <TV_IP> --name "Thales"              # your name (its initial shows
 - **Custom tile pictures.** `banner.sh` puts your own picture on a tile. A logo with a transparent background floats on the same glass as the other tiles, and tile pictures are scaled down in smooth steps so logos stay crisp.
 - **Hide HDMI tiles.** Hold OK on an HDMI tile and pick **Hide**. **Settings > Show hidden inputs** brings them back.
 - **Info button.** Info on the home asks TCL for its signal panel (resolution, HDR). In apps, Info belongs to the app.
+- **Apple TV rows.** The apps sit low so the wallpaper gets the screen; the second row only peeks at the bottom edge until Down reveals it.
 - **Back** on the home hides the apps and leaves the wallpaper and a small clock. Any button brings them back.
 - **Smooth.** Every wallpaper, gradient or picture plus its readability fade, is drawn once into a single bitmap. Full-screen gradients redrawn each frame ran at 32–73 ms a frame on this TV; now it's 10 ms with no dropped frames.
 
