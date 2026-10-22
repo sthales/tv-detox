@@ -10,7 +10,7 @@ import android.os.Looper;
 import java.io.File;
 
 final class Ambience {
-    private static final long WAIT = 5000, FADE_IN = 3000, FADE_OUT = 2000;
+    private static final long WAIT = 5000, FADE_IN = 10000, FADE_OUT = 4000;
 
     private final Context c;
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -94,6 +94,8 @@ final class Ambience {
         }
         fader = ValueAnimator.ofFloat(level, target);
         fader.setDuration(ms);
+        fader.setInterpolator(target > level ? new android.view.animation.AccelerateInterpolator(2f)
+                : new android.view.animation.DecelerateInterpolator(2f));
         fader.addUpdateListener(a -> {
             level = (float) a.getAnimatedValue();
             if (player != null) player.setVolume(level, level);
