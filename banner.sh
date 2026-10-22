@@ -22,15 +22,13 @@ case "$TV" in *:*) adb connect "$TV" >/dev/null 2>&1 || true ;; esac
 sh_tv() { adb -s "$TV" shell "$@" </dev/null | tr -d '\r'; }
 sh_tv pm list packages "$PKG" | grep -qx "package:$PKG" || { echo "$PKG isn't installed on the TV." >&2; exit 1; }
 
-DIR=/sdcard/Pictures/tvhome/banners
-sh_tv "mkdir -p $DIR; rm -f $DIR/$PKG.jpg $DIR/$PKG.jpeg $DIR/$PKG.png $DIR/$PKG.webp"
+# The home's own folder, which it creates when it starts.
+DIR=/sdcard/Android/data/com.ansub.tvhome/files/banners
+sh_tv "[ -d $DIR ] || { am start -n com.ansub.tvhome/.MainActivity >/dev/null; sleep 2; }"
+sh_tv "rm -f $DIR/$PKG.jpg $DIR/$PKG.jpeg $DIR/$PKG.png $DIR/$PKG.webp"
 if [ "$IMG" != --reset ]; then
   adb -s "$TV" push "$IMG" "$DIR/$PKG.$EXT" >/dev/null
-  if [ "$(sh_tv getprop ro.build.version.sdk)" -ge 33 ]; then
-    sh_tv pm grant com.ansub.tvhome android.permission.READ_MEDIA_IMAGES
-  else
-    sh_tv pm grant com.ansub.tvhome android.permission.READ_EXTERNAL_STORAGE
-  fi
+  sh_tv chmod 666 "$DIR/$PKG.$EXT"
 fi
 sh_tv am start -n com.ansub.tvhome/.MainActivity --es banner "$PKG" --es stamp "b$(date +%s)" >/dev/null
 [ "$IMG" = --reset ] && echo "Banner for $PKG: the app's own" || echo "Banner for $PKG: $(basename "$IMG")"

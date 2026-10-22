@@ -2,7 +2,7 @@
 # Checks the fork's additions on a TV that already runs this home. Unlike smoke-test.sh it never
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
-# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info perf. Name one to run only that.
+# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete. Name one to run only that.
 # The enabled accessibility services and the wallpaper are put back afterwards. The key map is reset to
 # extras.sh's default and hidden HDMI inputs are shown again (the app's settings can't be read from adb).
 #   sh ci/extras-test.sh <TV> postboot   right after a real restart, before any script: checks only
@@ -77,7 +77,7 @@ t_wallpaper() {
   sh wallpaper.sh "$TV" "$tmp/tvhome-test.png" >/dev/null || fail "wallpaper.sh failed"
   home
   shown | grep -q 'wallpaper:image:tvhome-test.png' || fail "image wallpaper not shown: $(shown)"
-  sh_tv rm -f /sdcard/Pictures/tvhome/tvhome-test.png
+  sh_tv rm -f /sdcard/Android/data/com.ansub.tvhome/files/wallpapers/tvhome-test.png
   sh_tv am force-stop $ME; home
   shown | grep -q 'wallpaper:Dusk' || fail "missing image didn't fall back to Dusk: $(shown)"
   # The home's own PSS includes about 55 MB of 1080p GPU buffers whatever the wallpaper, so compare
@@ -90,7 +90,7 @@ t_wallpaper() {
   shown | grep -q 'wallpaper:image:tvhome-big.png' || fail "big image not shown: $(shown)"
   [ $((big - base)) -lt 20000 ] || fail "a 6000x4000 image adds $((big - base)) KB over the gradient"
   echo "   6000x4000 image: $big KB vs gradient $base KB"
-  sh_tv rm -f /sdcard/Pictures/tvhome/tvhome-big.png
+  sh_tv rm -f /sdcard/Android/data/com.ansub.tvhome/files/wallpapers/tvhome-big.png
   sh_tv am start -n $ME/.MainActivity --es wallpaper "\"$was\"" --es stamp "w$(date +%s)" >/dev/null
   rm -rf "$tmp"
 }
@@ -246,6 +246,44 @@ t_perf() {
   [ "${jank:-100}" -lt 10 ] && [ "${p50:-999}" -lt 20 ] || fail "home not smooth: janky ${jank}%, median ${p50} ms"
 }
 
+# Rotation moves through the chosen wallpapers only (a 10 s interval, which the TV menu doesn't offer).
+t_rotate() {
+  home; was=$(shown | sed 's/.*wallpaper:\([^"]*\)"/\1/')
+  sh_tv am start -n $ME/.MainActivity --es rotation Dusk,Ocean --es rotate 10s --es stamp "r$(date +%s)" >/dev/null
+  home; sleep 12
+  shown | grep -q 'wallpaper:Dusk' || fail "rotation didn't move to Dusk: $(shown)"
+  sleep 11
+  shown | grep -q 'wallpaper:Ocean' || fail "rotation didn't move to Ocean: $(shown)"
+  sh_tv am start -n $ME/.MainActivity --es rotate off --es rotation none --es wallpaper "\"$was\"" --es stamp "r0$(date +%s)" >/dev/null
+  home; sleep 12
+  shown | grep -q "wallpaper:$was" || fail "rotation kept going after Off: $(shown)"
+}
+
+# Delete from the TV: Settings > Wallpaper, hold OK on the picture, Delete, confirm.
+t_delete() {
+  home; was=$(shown | sed 's/.*wallpaper:\([^"]*\)"/\1/')
+  tmp=$(mktemp -d); png 640 360 > "$tmp/tvhome-del.png"
+  sh wallpaper.sh "$TV" "$tmp/tvhome-del.png" >/dev/null || fail "wallpaper.sh failed"
+  home
+  for _ in 1 2 3; do sh_tv input keyevent KEYCODE_DPAD_DOWN; done
+  for _ in 1 2 3 4 5 6 7; do [ "$(focused)" = Settings ] && break; sh_tv input keyevent KEYCODE_DPAD_RIGHT; done
+  [ "$(focused)" = Settings ] || fail "couldn't reach the Settings tile"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 2
+  ui | grep -q 'text="tvhome-del.png"' || fail "the pushed picture isn't in the Wallpaper list"
+  sh_tv input keyevent --longpress KEYCODE_DPAD_CENTER; sleep 2
+  ui | grep -q 'text="Delete"' || fail "hold OK on the picture didn't offer Delete"
+  sh_tv input keyevent KEYCODE_DPAD_DOWN; sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 2
+  ui | grep -q 'Delete tvhome-del.png?' || fail "Delete didn't ask to confirm"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 2
+  sh_tv ls /sdcard/Android/data/$ME/files/wallpapers/ | grep -q tvhome-del.png && fail "the picture is still on the TV"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  home
+  shown | grep -q 'wallpaper:Dusk' || fail "deleting the shown picture didn't fall back to Dusk: $(shown)"
+  sh_tv am start -n $ME/.MainActivity --es wallpaper "\"$was\"" --es stamp "d$(date +%s)" >/dev/null
+  rm -rf "$tmp"
+}
+
 # Right after a real restart: the remap service and the bell must be back on their own.
 t_postboot() {
   a11y | grep -q "com.ansub.tvhome/" || fail "KeyService not enabled after the restart: $(a11y)"
@@ -258,7 +296,7 @@ if [ "$ONLY" = postboot ]; then echo "== postboot"; t_postboot; echo PASS; exit 
 saved=$(a11y)
 trap 'sh_tv "settings put secure $A11Y '"'"'$saved'"'"'" >/dev/null 2>&1' EXIT
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi boot apps banner info perf; do
+for t in baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"

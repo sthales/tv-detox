@@ -100,10 +100,9 @@ public class MainActivity extends Activity {
     // Android TV 11 and later (Google TV too) has no Display page, but its "Display & Sound" page holds Picture.
     private static final String[] TV_DISPLAY_SOUND = {"com.android.tv.settings",
             "com.android.tv.settings.device.displaysound.DisplaySoundActivity"};
-    // Wallpaper images, pushed by wallpaper.sh. The saved wallpaper is IMAGE + file name.
-    private static final String IMAGES = "/sdcard/Pictures/tvhome", IMAGE = "image:";
-    // Custom tile pictures, pushed by banner.sh as BANNERS/<package>.png (or .jpg, .webp).
-    private static final String BANNERS = IMAGES + "/banners";
+    // Wallpaper pictures, pushed by wallpaper.sh into the app's own folder (so it can delete them).
+    // The saved wallpaper is IMAGE + file name.
+    private static final String IMAGE = "image:";
     // Wallpapers, saved by name: a gradient top to bottom, then a glow from the top left and one from
     // the bottom right. Dark ones first, then bright ones that get darker towards the bottom, so the
     // white labels stay easy to read. Only colours, no images, so every one costs the same as Dusk,
@@ -131,6 +130,18 @@ public class MainActivity extends Activity {
     private static Typeface regular, semibold;
 
     private ScrollView scroller;
+
+    // The app's own folders on shared storage: no permission needed, and the app may delete in them.
+    // Scripts push into /sdcard/Android/data/com.ansub.tvhome/files/{wallpapers,banners}.
+    private File folder(String name) {
+        File base = getExternalFilesDir(null);
+        File f = new File(base != null ? base : getFilesDir(), name);
+        f.mkdirs();
+        return f;
+    }
+
+    private File images() { return folder("wallpapers"); }
+    private File banners() { return folder("banners"); }
     // The last two pictures shown, so moving back and forth in the Wallpaper list doesn't decode again.
     private final android.util.LruCache<String, Bitmap> decoded = new android.util.LruCache<>(2);
     private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -277,9 +288,12 @@ public class MainActivity extends Activity {
         String keys = intent == null ? null : intent.getStringExtra("keys");
         String wall = intent == null ? null : intent.getStringExtra("wallpaper");
         String hidden = intent == null ? null : intent.getStringExtra("hidden_inputs");
+        String rotate = intent == null ? null : intent.getStringExtra("rotate");
+        String rotation = intent == null ? null : intent.getStringExtra("rotation");
         // banner.sh only needs the tiles redrawn; the picture itself is the file.
         String banner = intent == null ? null : intent.getStringExtra("banner");
-        if (apps == null && quick == null && keys == null && wall == null && hidden == null && banner == null) return false;
+        if (apps == null && quick == null && keys == null && wall == null && hidden == null && banner == null
+                && rotate == null && rotation == null) return false;
         SharedPreferences prefs = getSharedPreferences(PREFS, 0);
         String stamp = intent.getStringExtra("stamp");
         if (stamp != null && stamp.equals(prefs.getString("stamp", null))) return false;
@@ -297,6 +311,8 @@ public class MainActivity extends Activity {
         }
         if (keys != null) e.putString("keys", keys.trim());
         if (wall != null) e.putString("wallpaper", wall.trim());
+        if (rotate != null) e.putString("rotate", rotate.trim()).putLong("rotate_at", System.currentTimeMillis());
+        if (rotation != null) e.putString("rotation", Config.joinSet(Config.splitSet(rotation)));
         if (hidden != null) {
             if (hidden.trim().equalsIgnoreCase("none")) e.remove("hidden_inputs");
             else e.putString("hidden_inputs", Config.joinSet(Config.splitSet(hidden)));
@@ -337,6 +353,7 @@ public class MainActivity extends Activity {
         }
         refreshNetwork();
         healServices();
+        rotateIfDue();
         View f = getCurrentFocus();
         if (f == null && !tiles.isEmpty()) tiles.get(0).requestFocus();
     }
@@ -408,6 +425,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        ui.removeCallbacks(rotateTick);
         showAmbient(false);
     }
 
@@ -433,7 +451,7 @@ public class MainActivity extends Activity {
         return new LayerDrawable(new Drawable[] {base, top, bottom});
     }
 
-    // The saved wallpaper: a gradient's name, or "image:" and a file in IMAGES. Dusk if none is saved.
+    // The saved wallpaper: a gradient's name, or "image:" and a file in images(). Dusk if none is saved.
     private String wallpaper() {
         return getSharedPreferences(PREFS, 0).getString("wallpaper", WALLPAPER_NAMES[0]);
     }
@@ -459,7 +477,7 @@ public class MainActivity extends Activity {
         if (b != null) return b;
         int w = getResources().getDisplayMetrics().widthPixels, h = getResources().getDisplayMetrics().heightPixels;
         if (name.startsWith(IMAGE)) {
-            b = crop(new File(IMAGES, name.substring(IMAGE.length())), w, h);
+            b = crop(new File(images(), name.substring(IMAGE.length())), w, h);
             if (b == null) return null;
             GradientDrawable clock = radial(0x8C000000, 0f, 0f, px(1100));
             GradientDrawable apps = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
@@ -479,10 +497,10 @@ public class MainActivity extends Activity {
         d.draw(new Canvas(onto));
     }
 
-    // Gradients first, then the images in IMAGES by name.
+    // Gradients first, then the pictures in images() by name.
     private List<String> wallpapers() {
         List<String> out = new ArrayList<>(Arrays.asList(WALLPAPER_NAMES));
-        String[] files = new File(IMAGES).list();
+        String[] files = images().list();
         if (files != null) {
             Arrays.sort(files, String.CASE_INSENSITIVE_ORDER);
             for (String f : files) if (Config.isImage(f)) out.add(IMAGE + f);
@@ -549,37 +567,129 @@ public class MainActivity extends Activity {
         }
     }
 
-    // The wallpapers, each with a small dot of its colours or of the picture. Moving through the list
-    // shows each one behind the panel; OK keeps it, Back goes back to the one before. Picture dots and
-    // previews are decoded in the background, and dots are kept on disk, so the list opens at once.
-    private void showWallpapers() {
+    // The wallpapers, each with a small dot of its colours or of the picture, after a "Rotate" row.
+    // Moving through the list shows each one behind the panel; OK keeps it, Back goes back to the one
+    // before. Hold OK (or Menu) on one to add it to the rotation (marked ↻), take it out, or delete a
+    // picture. Dots and previews are decoded in the background, and dots are kept on disk.
+    private void showWallpapers(String focus) {
         final int size = px(40);
         final List<String> names = wallpapers();
+        final java.util.Set<String> rotation = Config.splitSet(getSharedPreferences(PREFS, 0).getString("rotation", null));
         List<String> labels = new ArrayList<>();
-        for (String n : names) labels.add(n.startsWith(IMAGE) ? n.substring(IMAGE.length()) : n);
+        labels.add(Strings.t("Rotate") + ": " + Strings.t(ROTATE_LABELS[rotateChoice()]));
+        for (String n : names)
+            labels.add((n.startsWith(IMAGE) ? n.substring(IMAGE.length()) : n) + (rotation.contains(n) ? "  \u21BB" : ""));
+        int at = names.indexOf(focus != null ? focus : wallpaper());
         final BaseAdapter[] list = new BaseAdapter[1];
         list[0] = panel(Strings.t("Wallpaper"), labels, pos -> {
-            String n = names.get(pos);
-            if (n.startsWith(IMAGE)) return thumb(new File(IMAGES, n.substring(IMAGE.length())), size, list);
-            int[] c = WALLPAPERS[pos];
+            if (pos == 0) return new ColorDrawable(Color.TRANSPARENT);
+            String n = names.get(pos - 1);
+            if (n.startsWith(IMAGE)) return thumb(new File(images(), n.substring(IMAGE.length())), size, list);
+            int[] c = WALLPAPERS[pos - 1];
             GradientDrawable dot = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                     new int[] {glow(c[3], c[0]), c[1], glow(c[4], c[0])});
             dot.setShape(GradientDrawable.OVAL);
             dot.setStroke(Math.max(1, px(2)), 0x26FFFFFF);
             dot.setSize(size, size);
             return dot;
-        }, size, Math.max(0, names.indexOf(wallpaper())), pos -> {
+        }, size, at < 0 ? 1 : at + 1, pos -> {
             // Wait for the arrows to settle, so holding one doesn't decode every picture it passes.
             ui.removeCallbacks(pendingPreview);
-            previewing = names.get(pos);
-            pendingPreview = () -> preview(names.get(pos));
+            if (pos == 0) return;
+            previewing = names.get(pos - 1);
+            pendingPreview = () -> preview(names.get(pos - 1));
             ui.postDelayed(pendingPreview, 150);
         }, which -> {
             ui.removeCallbacks(pendingPreview);
             previewing = null;
-            getSharedPreferences(PREFS, 0).edit().putString("wallpaper", names.get(which)).apply();
-            showWallpaper(names.get(which));
+            showWallpaper(wallpaper());
+            if (which == 0) {
+                showRotateChoices();
+                return;
+            }
+            getSharedPreferences(PREFS, 0).edit().putString("wallpaper", names.get(which - 1)).apply();
+            showWallpaper(names.get(which - 1));
+        }, which -> {
+            ui.removeCallbacks(pendingPreview);
+            previewing = null;
+            showWallpaper(wallpaper());
+            if (which > 0) showWallpaperMenu(names.get(which - 1));
+        });
+    }
+
+    private static final String[] ROTATE_LABELS = {"Off", "30 min", "1 hour", "4 hours", "12 hours", "24 hours", "1 week"};
+
+    private int rotateChoice() {
+        int i = Arrays.asList(Config.ROTATE_CHOICES).indexOf(getSharedPreferences(PREFS, 0).getString("rotate", "off"));
+        return Math.max(0, i);
+    }
+
+    private void showRotateChoices() {
+        List<String> labels = new ArrayList<>();
+        for (String l : ROTATE_LABELS) labels.add(Strings.t(l));
+        panel(Strings.t("Rotate"), labels, null, 0, rotateChoice(), pos -> {}, which -> {
+            getSharedPreferences(PREFS, 0).edit().putString("rotate", Config.ROTATE_CHOICES[which])
+                    .putLong("rotate_at", System.currentTimeMillis()).apply();
+            rotateIfDue();
+            showWallpapers(null);
         }, null);
+    }
+
+    // Hold OK on a wallpaper: in or out of the rotation, and Delete for a picture (asks first).
+    private void showWallpaperMenu(final String name) {
+        final java.util.Set<String> rotation = Config.splitSet(getSharedPreferences(PREFS, 0).getString("rotation", null));
+        final boolean in = rotation.contains(name);
+        final boolean picture = name.startsWith(IMAGE);
+        final String label = picture ? name.substring(IMAGE.length()) : name;
+        List<String> items = new ArrayList<>();
+        items.add(Strings.t(in ? "Remove from rotation" : "Add to rotation"));
+        if (picture) items.add(Strings.t("Delete"));
+        panel(label, items, which -> {
+            if (which == 0) {
+                if (in) rotation.remove(name);
+                else rotation.add(name);
+                getSharedPreferences(PREFS, 0).edit().putString("rotation", Config.joinSet(rotation)).apply();
+                rotateIfDue();
+                showWallpapers(name);
+                return;
+            }
+            panel(String.format(Strings.t("Delete %s?"), label), java.util.Arrays.asList(Strings.t("Delete"), Strings.t("Cancel")), confirm -> {
+                if (confirm != 0) {
+                    showWallpapers(name);
+                    return;
+                }
+                new File(images(), label).delete();
+                rotation.remove(name);
+                SharedPreferences.Editor e = getSharedPreferences(PREFS, 0).edit().putString("rotation", Config.joinSet(rotation));
+                if (name.equals(wallpaper())) e.putString("wallpaper", WALLPAPER_NAMES[0]);
+                e.apply();
+                showWallpaper(wallpaper());
+                showWallpapers(null);
+            });
+        });
+    }
+
+    // Rotation: while the home is in front, every interval it moves to the next wallpaper marked for
+    // rotation. Only the visible home ticks, so nothing runs while an app or the PS5 is on.
+    private final Runnable rotateTick = this::rotateIfDue;
+
+    private void rotateIfDue() {
+        ui.removeCallbacks(rotateTick);
+        SharedPreferences p = getSharedPreferences(PREFS, 0);
+        long interval = Config.intervalMillis(p.getString("rotate", null));
+        List<String> rotation = new ArrayList<>();
+        java.util.Set<String> chosen = Config.splitSet(p.getString("rotation", null));
+        for (String n : wallpapers()) if (chosen.contains(n)) rotation.add(n);
+        if (interval == 0 || rotation.isEmpty()) return;
+        long now = System.currentTimeMillis(), at = p.getLong("rotate_at", 0);
+        if (Config.rotationDue(at, now, interval)) {
+            String next = Config.nextInRotation(rotation, wallpaper());
+            p.edit().putString("wallpaper", next).putLong("rotate_at", now).apply();
+            at = now;
+            previewing = next;
+            preview(next);
+        }
+        ui.postDelayed(rotateTick, Math.max(1000, at + interval - now));
     }
 
     // Shows a wallpaper from the list: gradients and decoded pictures at once, others once decoded.
@@ -595,7 +705,7 @@ public class MainActivity extends Activity {
     }
 
     private String imageKey(String name) {
-        File f = new File(IMAGES, name.substring(IMAGE.length()));
+        File f = new File(images(), name.substring(IMAGE.length()));
         return f.getPath() + "@" + f.lastModified();
     }
 
@@ -675,7 +785,7 @@ public class MainActivity extends Activity {
         ((FrameLayout.LayoutParams) moveHint.getLayoutParams()).topMargin = gridTop - px(64);
         root.setMinimumHeight(bottomTop + h + px(MARGIN));
 
-        String[] banners = new File(BANNERS).list();
+        String[] banners = banners().list();
         glassBanners.clear();
         for (String pkg : apps) {
             Intent li = launchIntent(pm, pkg);
@@ -683,7 +793,7 @@ public class MainActivity extends Activity {
             Drawable banner = null;
             String custom = Config.bannerFile(pkg, banners);
             if (custom != null) {
-                Bitmap b = sharp(new File(BANNERS, custom), w, h);
+                Bitmap b = sharp(new File(banners(), custom), w, h);
                 if (b != null) {
                     banner = new BitmapDrawable(getResources(), b);
                     glassBanners.add(pkg);
@@ -893,7 +1003,7 @@ public class MainActivity extends Activity {
                 items[SETTINGS_ITEMS.length] = "Show hidden inputs";
             }
             dropdown(tile(SETTINGS), items, which -> {
-                if (which == 0) showWallpapers();
+                if (which == 0) showWallpapers(null);
                 else if (which == 1) openBrightness();
                 else if (which == 2) openTvSettings();
                 else saveHiddenInputs(new java.util.LinkedHashSet<String>());

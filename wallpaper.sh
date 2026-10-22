@@ -18,13 +18,10 @@ case "$TV" in *:*) adb connect "$TV" >/dev/null 2>&1 || true ;; esac
 [ "$(adb -s "$TV" get-state 2>/dev/null)" = device ] || { echo "Can't reach $TV." >&2; exit 1; }
 
 NAME=$(basename "$IMG" | tr -c 'A-Za-z0-9._\n-' '_')
-DIR=/sdcard/Pictures/tvhome
-adb -s "$TV" shell "mkdir -p $DIR"
+# The home's own folder: it creates it when it starts, and may delete pictures in it from the TV.
+DIR=/sdcard/Android/data/com.ansub.tvhome/files/wallpapers
+adb -s "$TV" shell "[ -d $DIR ] || { am start -n com.ansub.tvhome/.MainActivity >/dev/null; sleep 2; }"
 adb -s "$TV" push "$IMG" "$DIR/$NAME" >/dev/null
-if [ "$(adb -s "$TV" shell getprop ro.build.version.sdk | tr -d '\r')" -ge 33 ]; then
-  adb -s "$TV" shell pm grant com.ansub.tvhome android.permission.READ_MEDIA_IMAGES
-else
-  adb -s "$TV" shell pm grant com.ansub.tvhome android.permission.READ_EXTERNAL_STORAGE
-fi
+adb -s "$TV" shell chmod 666 "$DIR/$NAME"
 adb -s "$TV" shell am start -n com.ansub.tvhome/.MainActivity --es wallpaper "\"image:$NAME\"" --es stamp "w$(date +%s)" >/dev/null
 echo "Wallpaper: $NAME"

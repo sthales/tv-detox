@@ -13,6 +13,8 @@ final class Strings {
         "Move", "Replace", "Remove from home", "Uninstall", "App info",
         "Use the arrows to move it, then press OK", "Every app is already here", "Add an app", "Replace %s", "Wallpaper", "TV settings", "Brightness",
         "Notifications", "No notifications", "Clear all", "Hide", "Show hidden inputs", "Apps", "Add to home",
+        "Rotate", "Off", "30 min", "1 hour", "4 hours", "12 hours", "24 hours", "1 week",
+        "Add to rotation", "Remove from rotation", "Delete", "Delete %s?", "Cancel",
     };
 
     // Keyed by language ("de"), or language-country ("zh-TW") where a country writes it differently.
