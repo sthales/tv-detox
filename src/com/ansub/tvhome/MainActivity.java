@@ -1280,9 +1280,34 @@ public class MainActivity extends Activity {
         int sw = wall.getWidth(), sh = wall.getHeight();
         int x = Math.max(0, sw - w - px(24)), y = Math.max(0, (sh - h) / 2);
         Bitmap part = Bitmap.createBitmap(wall, x, y, Math.min(w, sw - x), Math.min(h, sh - y));
-        Bitmap small = Bitmap.createScaledBitmap(part, Math.max(1, part.getWidth() / 24), Math.max(1, part.getHeight() / 24), true);
-        Bitmap mid = Bitmap.createScaledBitmap(small, Math.max(1, part.getWidth() / 6), Math.max(1, part.getHeight() / 6), true);
-        return Bitmap.createScaledBitmap(mid, w, h, true);
+        // Blur a small copy (box blur, three passes ~ gaussian), then grow it back: smooth, done once.
+        Bitmap small = Bitmap.createScaledBitmap(part, Math.max(1, part.getWidth() / 8), Math.max(1, part.getHeight() / 8), true);
+        int sw2 = small.getWidth(), sh2 = small.getHeight();
+        int[] px = new int[sw2 * sh2];
+        small.getPixels(px, 0, sw2, 0, 0, sw2, sh2);
+        for (int pass = 0; pass < 3; pass++) {
+            boxBlur(px, sw2, sh2, 4, true);
+            boxBlur(px, sw2, sh2, 4, false);
+        }
+        Bitmap blurred = Bitmap.createBitmap(px, sw2, sh2, Bitmap.Config.ARGB_8888);
+        return Bitmap.createScaledBitmap(blurred, w, h, true);
+    }
+
+    // One box-blur pass of radius r over rows (horizontal) or columns, in place.
+    private static void boxBlur(int[] px, int w, int h, int r, boolean horizontal) {
+        int n = horizontal ? w : h, lines = horizontal ? h : w;
+        int[] line = new int[n];
+        for (int l = 0; l < lines; l++) {
+            for (int i = 0; i < n; i++) line[i] = px[horizontal ? l * w + i : i * w + l];
+            for (int i = 0; i < n; i++) {
+                int a = 0, rr = 0, g = 0, b = 0, c = 0;
+                for (int k = Math.max(0, i - r); k <= Math.min(n - 1, i + r); k++, c++) {
+                    int p = line[k];
+                    a += p >>> 24; rr += (p >> 16) & 0xFF; g += (p >> 8) & 0xFF; b += p & 0xFF;
+                }
+                px[horizontal ? l * w + i : i * w + l] = (a / c) << 24 | (rr / c) << 16 | (g / c) << 8 | (b / c);
+            }
+        }
     }
 
     // TCL's input picker, else Android's settings.

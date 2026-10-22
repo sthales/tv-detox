@@ -33,7 +33,7 @@ final class LineIcon extends Drawable {
             1, 135, 190, 2};
     static final int[] INPUT = {0, 40, 70, 1, 40, 50, 1, 200, 50, 1, 200, 190, 1, 40, 190, 1, 40, 170,
             0, 30, 120, 1, 130, 120, 0, 95, 85, 1, 130, 120, 1, 95, 155};
-    static final int[] MOON = {4, 120, 120, 75, 30, 300, 0, 185, 80, 1, 185, 80};
+    static final int[] MOON = {4, 120, 120, 80, 50, 260, 4, 190, 120, 64, 253, -146};
     static final int[] FRAME = {0, 30, 45, 1, 210, 45, 1, 210, 195, 1, 30, 195, 2, 0, 45, 170, 1, 105, 105,
             1, 145, 145, 1, 165, 125, 1, 210, 170, 3, 165, 85, 14};
     static final int[] BELL = {0, 70, 165, 1, 70, 105, 4, 120, 105, 50, 180, 180, 0, 170, 105, 1, 170, 165,
@@ -79,8 +79,9 @@ final class LineIcon extends Drawable {
         c.restore();
     }
 
-    @Override public void setAlpha(int a) { paint.setAlpha(a); }
-    @Override public void setColorFilter(ColorFilter cf) { paint.setColorFilter(cf); }
+    // Both redraw: a focused Control Center tile turns its icon dark, and back to white when it leaves.
+    @Override public void setAlpha(int a) { paint.setAlpha(a); invalidateSelf(); }
+    @Override public void setColorFilter(ColorFilter cf) { paint.setColorFilter(cf); invalidateSelf(); }
     @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }
     @Override public int getIntrinsicWidth() { return 44; }
     @Override public int getIntrinsicHeight() { return 44; }
