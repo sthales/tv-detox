@@ -78,6 +78,25 @@ t_wallpaper() {
   rm -rf "$tmp"
 }
 
+ambient_on() { ui | grep -q 'content-desc="ambient"'; }
+apps_on() { ui | grep -q 'text="Settings"'; }
+
+t_ambient() {
+  home
+  apps_on || fail "no Settings tile before Back"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  ambient_on || fail "Back didn't show the ambient view"
+  apps_on && fail "apps still showing in the ambient view"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
+  ambient_on && fail "OK didn't leave the ambient view"
+  apps_on || fail "apps didn't come back"
+  focus | grep -q $ME || fail "OK in the ambient view opened something"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  ambient_on || fail "second Back didn't show the ambient view"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  apps_on || fail "Back didn't leave the ambient view"
+}
+
 sh_tv logcat -b crash -c
 for t in baseline keys wallpaper ambient bell hdmi; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue

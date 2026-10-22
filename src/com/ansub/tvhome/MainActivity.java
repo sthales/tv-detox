@@ -128,6 +128,9 @@ public class MainActivity extends Activity {
     private static Typeface regular, semibold;
 
     private ScrollView scroller;
+    // Back on the home hides the page and leaves the wallpaper and a small clock; any key brings it back.
+    private boolean ambient;
+    private FrameLayout ambientClock;
     private FrameLayout root; // the page, inside a vertical scroller
     private int tileW, tileH, gridTop; // app grid geometry, set by buildTiles
     private final List<View> tiles = new ArrayList<>();
@@ -204,6 +207,14 @@ public class MainActivity extends Activity {
         root.addView(moveHint, at(px(MARGIN), px(ROW1_TOP - 64), -2, -2));
 
         setContentView(scroller);
+        // TextClock writes the time into its own description, so the "ambient" name sits on a wrapper.
+        ambientClock = new FrameLayout(this);
+        ambientClock.setContentDescription("ambient");
+        ambientClock.setVisibility(View.GONE);
+        FrameLayout.LayoutParams acp = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.END);
+        acp.setMargins(0, 0, px(MARGIN), px(64));
+        ambientClock.addView(clock("h:mm", "H:mm", px(56), 0x99FFFFFF, regular));
+        addContentView(ambientClock, acp);
 
         IntentFilter f = new IntentFilter();
         f.addAction(Intent.ACTION_PACKAGE_ADDED);
@@ -328,7 +339,34 @@ public class MainActivity extends Activity {
     }
 
     @Override
-    public void onBackPressed() { /* home screen: nothing to go back to */ }
+    public void onBackPressed() {
+        if (!ambient) showAmbient(true);
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (!ambient) return super.dispatchKeyEvent(event);
+        if (event.getAction() == KeyEvent.ACTION_UP) showAmbient(false);
+        return true;
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        showAmbient(false);
+    }
+
+    private void showAmbient(boolean on) {
+        if (ambient == on || scroller == null) return;
+        ambient = on;
+        scroller.setVisibility(on ? View.INVISIBLE : View.VISIBLE);
+        ambientClock.setVisibility(on ? View.VISIBLE : View.GONE);
+        if (!on && getCurrentFocus() == null) {
+            View back = tile(focusedKey);
+            if (back == null && !tiles.isEmpty()) back = tiles.get(0);
+            if (back != null) back.requestFocus();
+        }
+    }
 
     // Static gradient, drawn once by the window: no extra view, no animation.
     private Drawable background(int[] c) {
