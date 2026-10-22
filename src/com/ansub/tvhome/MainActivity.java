@@ -262,10 +262,11 @@ public class MainActivity extends Activity {
         String drift = intent == null ? null : intent.getStringExtra("saver_drift");
         String sharp = intent == null ? null : intent.getStringExtra("saver_4k");
         String tvSaver = intent == null ? null : intent.getStringExtra("tv_saver");
+        String lower = intent == null ? null : intent.getStringExtra("lower");
         if (apps == null && quick == null && keys == null && wall == null && hidden == null && banner == null
                 && rotate == null && rotation == null && name == null && avatar == null && settings == null
                 && every == null && showcase == null && sources == null && drift == null && sharp == null
-                && tvSaver == null) return false;
+                && tvSaver == null && lower == null) return false;
         SharedPreferences prefs = getSharedPreferences(PREFS, 0);
         String stamp = intent.getStringExtra("stamp");
         if (stamp != null && stamp.equals(prefs.getString("stamp", null))) return false;
@@ -286,6 +287,7 @@ public class MainActivity extends Activity {
         if (drift != null) e.putBoolean("saver_drift", drift.trim().equals("on"));
         if (sharp != null) e.putBoolean("saver_4k", sharp.trim().equals("on"));
         if (tvSaver != null) e.putBoolean("tv_saver", tvSaver.trim().equals("on"));
+        if (lower != null) e.putString("lower", Config.joinSet(Config.splitSet(lower)));
         if (apps != null) {
             apps = apps.trim();
             if (apps.isEmpty() || apps.equalsIgnoreCase("auto")) e.remove("apps");
@@ -315,7 +317,8 @@ public class MainActivity extends Activity {
         List<String> out = new ArrayList<>();
         String saved = getSharedPreferences(PREFS, 0).getString("apps", null);
         String[] wanted = saved != null ? saved.split("[,\\s]+") : Apps.LIST;
-        for (String p : wanted) if (!p.isEmpty() && !out.contains(p) && launchIntent(pm, p) != null) out.add(p);
+        for (String p : wanted)
+            if (!p.isEmpty() && !out.contains(p) && (isInput(p) ? input(p) != null : launchIntent(pm, p) != null)) out.add(p);
         if (saved == null) {
             // Top up with other TV apps people installed (or updated), skipping launchers and system tools.
             Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
@@ -1070,8 +1073,7 @@ public class MainActivity extends Activity {
         List<String> apps = appList(pm);
         // Apps fill rows of six. With more rows the grid starts higher, so up to two rows of apps and
         // the bottom row still fit on screen; past that the page scrolls.
-        int launchable = 0;
-        for (String pkg : apps) if (launchIntent(pm, pkg) != null) launchable++;
+        int launchable = apps.size();
         int rows = Math.max(1, (launchable + PER_ROW - 1) / PER_ROW);
         gridTop = Math.max(px(GRID_MIN_TOP), px(ROW1_TOP) - (rows - 1) * px(ROW_STEP));
         int bottomTop = gridTop + rows * px(ROW_STEP);
@@ -1082,6 +1084,13 @@ public class MainActivity extends Activity {
         String[] banners = banners().list();
         glassBanners.clear();
         for (String pkg : apps) {
+            if (isInput(pkg)) {
+                Drawable banner = inputBanner(pkg, banners, w, h);
+                int i = rowApps.size();
+                rowApps.add(pkg);
+                addTile(root, pkg, inputLabel(input(pkg)), banner, banner == null ? LineIcon.HDMI : null, null, gridX(i), gridY(i), w, h);
+                continue;
+            }
             Intent li = launchIntent(pm, pkg);
             if (li == null) continue;
             Drawable banner = null;
@@ -1110,19 +1119,28 @@ public class MainActivity extends Activity {
         // Bottom row: Play Store, HDMI inputs, Settings and Add app, six at most.
         int col = 0;
         boolean store = !apps.contains(PLAY_STORE) && launchIntent(pm, PLAY_STORE) != null;
-        List<TvInputInfo> inputs = hdmiInputs();
+        List<TvInputInfo> inputs = new ArrayList<>();
+        for (TvInputInfo in : hdmiInputs()) if (!apps.contains(in.getId())) inputs.add(in);
+        List<String> lower = new ArrayList<>();
+        for (String p : Config.splitSet(getSharedPreferences(PREFS, 0).getString("lower", null)))
+            if (!apps.contains(p) && !p.equals(PLAY_STORE) && launchIntent(pm, p) != null) lower.add(p);
         int room = PER_ROW - 2 - (store ? 1 : 0);
+        if (lower.size() > room) lower = lower.subList(0, room);
+        room -= lower.size();
         if (inputs.size() > room) inputs = inputs.subList(0, room);
         if (store)
             addTile(root, PLAY_STORE, "Play Store", null, LineIcon.PLAY, null, m + col++ * (w + g), bottomTop, w, h);
+        for (String p : lower) {
+            String label = p;
+            Drawable icon = null;
+            try {
+                label = pm.getApplicationLabel(pm.getApplicationInfo(p, 0)).toString();
+                icon = pm.getApplicationIcon(p);
+            } catch (Exception ignored) {}
+            addTile(root, p, label, null, null, icon, m + col++ * (w + g), bottomTop, w, h);
+        }
         for (TvInputInfo in : inputs) {
-            Drawable banner = null;
-            String custom = Config.bannerFile(Config.fileKey(in.getId()), banners);
-            Bitmap b = custom == null ? null : sharp(new File(banners(), custom), w, h);
-            if (b != null) {
-                banner = new BitmapDrawable(getResources(), b);
-                glassBanners.add(in.getId());
-            }
+            Drawable banner = inputBanner(in.getId(), banners, w, h);
             addTile(root, in.getId(), inputLabel(in), banner, banner == null ? LineIcon.HDMI : null, null,
                     m + col++ * (w + g), bottomTop, w, h);
         }
@@ -1967,7 +1985,8 @@ public class MainActivity extends Activity {
         final int index = rowApps.indexOf(key);
         if (index < 0) return;
         final boolean user = userInstalled(key);
-        dropdown(tile(key), user ? EDIT_ITEMS : EDIT_ITEMS_SYSTEM, which -> {
+        String[] items = isInput(key) ? Arrays.copyOf(EDIT_ITEMS, 3) : user ? EDIT_ITEMS : EDIT_ITEMS_SYSTEM;
+        dropdown(tile(key), items, which -> {
             if (which == 0) startMove(key);
             else if (which == 1) showAddMenu(index);
             else if (which == 3) {
@@ -2121,6 +2140,19 @@ public class MainActivity extends Activity {
             return true;
         }
         return true; // up/down and everything else stay put while moving
+    }
+
+    private Drawable inputBanner(String id, String[] banners, int w, int h) {
+        String custom = Config.bannerFile(Config.fileKey(id), banners);
+        Bitmap b = custom == null ? null : sharp(new File(banners(), custom), w, h);
+        if (b == null) return null;
+        glassBanners.add(id);
+        return new BitmapDrawable(getResources(), b);
+    }
+
+    private TvInputInfo input(String id) {
+        for (TvInputInfo in : hdmiInputs()) if (in.getId().equals(id)) return in;
+        return null;
     }
 
     private static boolean isInput(String key) {

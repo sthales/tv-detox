@@ -2,7 +2,7 @@
 # Checks the fork's additions on a TV that already runs this home. Unlike smoke-test.sh it never
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
-# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream nowplaying. Name one to run only that.
+# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream pinned nowplaying. Name one to run only that.
 # The enabled accessibility services and all the home's settings are put back afterwards (settings export/import).
 #   sh ci/extras-test.sh <TV> postboot   right after a real restart, before any script: checks only
 set -e
@@ -432,6 +432,35 @@ t_slidenav() {
   apps_on || fail "OK didn't leave the slideshow"
 }
 
+caption() {
+  ui | python3 -c 'import sys,re
+x=sys.stdin.read(); b=lambda n: [int(v) for v in re.search(r"bounds=\"\[(\d+),(\d+)\]\[(\d+),(\d+)\]",n).groups()]
+nodes=re.findall(r"<node [^>]*>",x); f=[n for n in nodes if "focused=\"true\"" in n]
+if f:
+  fx=b(f[0])
+  for n in nodes:
+    t=re.search(r"text=\"([^\"]+)\"",n)
+    if t and b(n)[0]==fx[0] and b(n)[1]>=fx[1]: print(t.group(1)); break'
+}
+t_pinned() {
+  P=com.tcl.tvinput/.TvPassThroughService/HW15
+  sh_tv am start -n $ME/.MainActivity --es apps "\"com.google.android.youtube.tv,$P\"" --es lower com.spotify.tv.android \
+    --es hidden_inputs none --es stamp "pn$(date +%s)" >/dev/null; sleep 2
+  home; sleep 1
+  for k in DOWN DOWN UP LEFT LEFT LEFT RIGHT; do sh_tv input keyevent KEYCODE_DPAD_$k; sleep 0.3; done; sleep 1
+  name=$(caption); [ -n "$name" ] && [ "$name" != YouTube ] || fail "the second top tile isn't the pinned input (caption: '$name')"
+  sh_tv input keyevent KEYCODE_MENU; sleep 1
+  x=$(ui)
+  echo "$x" | grep -q 'text="Remove from home"' || fail "the pinned input has no home menu"
+  echo "$x" | grep -qE 'text="(Uninstall|App info)"' && fail "the pinned input's menu offers Uninstall/App info"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 1
+  x=$(ui)
+  echo "$x" | grep -q 'text="Spotify"' || fail "the lower app isn't in the bottom row"
+  echo "$x" | grep -q "text=\"$name\"" && fail "$name is in the bottom row too"
+  sh_tv input keyevent KEYCODE_DPAD_UP; sleep 1
+}
+
 yt_state() { sh_tv dumpsys media_session | awk '/package=com.google.android.youtube.tv/{f=1} f&&/state=PlaybackState/{print; exit}' | grep -o '{state=[A-Z_]*' | cut -c2-; }
 t_nowplaying() {
   sh_tv cmd media_session dispatch pause >/dev/null 2>&1; home; sleep 1
@@ -491,7 +520,7 @@ restore_all() {
 }
 trap restore_all EXIT
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream nowplaying; do
+for t in baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream pinned nowplaying; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"
