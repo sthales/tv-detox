@@ -9,7 +9,7 @@
 #   sh extras.sh <TV_IP> ""                        no remapped buttons, the service is turned off
 # Run it again after reinstalling the home.
 set -e
-TARGET="$1"; KEYS="${2-4020:com.stremio.one,4062:com.netflix.ninja,4099:com.amazon.amazonvideo.livingroom,190:com.google.android.youtube.tv,4001:com.tcl.tv,83:@control}"
+TARGET="$1"; KEYS="${2-4020:com.stremio.one,4062:com.netflix.ninja,4099:com.amazon.amazonvideo.livingroom,190:com.google.android.youtube.tv,4001:com.tcl.channelplus/com.tcl.iptv.service.InputService,83:@control}"
 [ -n "$TARGET" ] || { echo "Usage: sh extras.sh <TV_IP> [\"keycode:package,...\"]" >&2; exit 1; }
 case "$TARGET" in
   *.*.*.*:*) TV=$TARGET ;;

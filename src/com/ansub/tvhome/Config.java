@@ -40,6 +40,13 @@ final class Config {
     }
 
     // Wallpaper images: the picture formats Android decodes everywhere.
+    static boolean isSound(String name) {
+        if (name == null) return false;
+        String n = name.toLowerCase(java.util.Locale.ROOT);
+        for (String ext : new String[] {".mp3", ".m4a", ".aac", ".ogg", ".wav", ".flac"}) if (n.endsWith(ext)) return true;
+        return false;
+    }
+
     static boolean isImage(String name) {
         if (name == null) return false;
         String n = name.toLowerCase(java.util.Locale.ROOT);
@@ -61,6 +68,13 @@ final class Config {
     }
 
     // The custom banner for pkg among the files in the banners folder: "<pkg>.<picture extension>".
+    static final java.util.List<String> TV_PLAYERS = java.util.Arrays.asList("com.tcl.tv", "com.android.tv",
+            "com.droidlogic.android.tv", "com.google.android.tv.inputplayer");
+
+    static boolean slideshowOnSourceLost(int before, int after, String foreground, boolean enabled) {
+        return enabled && before == 0 && after != 0 && TV_PLAYERS.contains(foreground);
+    }
+
     static String fileKey(String id) {
         return id.replaceAll("[^A-Za-z0-9._]", "_");
     }

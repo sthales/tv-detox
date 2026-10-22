@@ -267,11 +267,13 @@ public class MainActivity extends Activity {
         String drift = intent == null ? null : intent.getStringExtra("saver_drift");
         String sharp = intent == null ? null : intent.getStringExtra("saver_4k");
         String tvSaver = intent == null ? null : intent.getStringExtra("tv_saver");
+        String saverSound = intent == null ? null : intent.getStringExtra("saver_sound");
+        String saverVolume = intent == null ? null : intent.getStringExtra("saver_volume");
         String lower = intent == null ? null : intent.getStringExtra("lower");
         if (apps == null && quick == null && keys == null && wall == null && hidden == null && banner == null
                 && rotate == null && rotation == null && name == null && avatar == null && settings == null
                 && every == null && showcase == null && sources == null && drift == null && sharp == null
-                && tvSaver == null && lower == null) return false;
+                && tvSaver == null && lower == null && saverSound == null && saverVolume == null) return false;
         SharedPreferences prefs = getSharedPreferences(PREFS, 0);
         String stamp = intent.getStringExtra("stamp");
         if (stamp != null && stamp.equals(prefs.getString("stamp", null))) return false;
@@ -293,6 +295,8 @@ public class MainActivity extends Activity {
         if (sharp != null) e.putBoolean("saver_4k", sharp.trim().equals("on"));
         if (tvSaver != null) e.putBoolean("tv_saver", tvSaver.trim().equals("on"));
         if (lower != null) e.putString("lower", Config.joinSet(Config.splitSet(lower)));
+        if (saverSound != null) e.putString("saver_sound", saverSound.trim().equals("off") ? "" : saverSound.trim());
+        if (saverVolume != null) try { e.putInt("saver_volume", Integer.parseInt(saverVolume.trim())); } catch (NumberFormatException ignored) {}
         if (apps != null) {
             apps = apps.trim();
             if (apps.isEmpty() || apps.equalsIgnoreCase("auto")) e.remove("apps");
@@ -510,41 +514,50 @@ public class MainActivity extends Activity {
     private static final String[] SAVER_EVERY_LABELS = {"1 min", "5 min", "15 min", "30 min"};
     private static final String[] SOURCE_LABELS = {"Places", "Earth", "Space"};
 
+    private static final int[] SAVER_VOLUMES = {10, 20, 30};
+
     private void showSaverSettings(final int row) {
         final SharedPreferences p = getSharedPreferences(PREFS, 0);
         String on = Strings.t("On"), off = Strings.t("Off");
         int every = Math.max(0, Arrays.asList(SAVER_EVERY).indexOf(p.getString("showcase_every", "5m")));
+        final String[] sounds = Ambience.names(this);
+        final int sound = Arrays.asList(sounds).indexOf(p.getString("saver_sound", ""));
+        int vol = 0;
+        for (int i = 0; i < SAVER_VOLUMES.length; i++) if (SAVER_VOLUMES[i] == p.getInt("saver_volume", 20)) vol = i;
+        final int volume = vol;
         final List<String> rows = new ArrayList<>();
+        final List<Runnable> actions = new ArrayList<>();
         rows.add(Strings.t("Start now"));
+        actions.add(null);
         rows.add(Strings.t("Change picture") + ": " + String.format(Strings.t("every %s"), Strings.t(SAVER_EVERY_LABELS[every])));
+        actions.add(() -> p.edit().putString("showcase_every", SAVER_EVERY[(every + 1) % SAVER_EVERY.length]).commit());
         rows.add(Strings.t("Your pictures") + " \u2605: " + Config.splitSet(p.getString("showcase", null)).size());
-        for (int i = 0; i < OnlinePictures.SOURCES.length; i++)
-            rows.add(Strings.t(SOURCE_LABELS[i]) + ": " + (OnlinePictures.enabled(this, OnlinePictures.SOURCES[i]) ? on : off));
+        actions.add(null);
+        for (int i = 0; i < OnlinePictures.SOURCES.length; i++) {
+            final String src = OnlinePictures.SOURCES[i];
+            rows.add(Strings.t(SOURCE_LABELS[i]) + ": " + (OnlinePictures.enabled(this, src) ? on : off));
+            actions.add(() -> p.edit().putBoolean("src_" + src, !OnlinePictures.enabled(this, src)).commit());
+        }
+        rows.add(Strings.t("Sound") + ": " + (sound < 0 ? off : Ambience.label(sounds[sound])));
+        actions.add(() -> p.edit().putString("saver_sound", sound + 1 < sounds.length ? sounds[sound + 1] : "").commit());
+        rows.add(Strings.t("Volume") + ": " + SAVER_VOLUMES[volume] + "%");
+        actions.add(() -> p.edit().putInt("saver_volume", SAVER_VOLUMES[(volume + 1) % SAVER_VOLUMES.length]).commit());
         rows.add(Strings.t("Drift") + ": " + (p.getBoolean("saver_drift", false) ? on : off));
+        actions.add(() -> p.edit().putBoolean("saver_drift", !p.getBoolean("saver_drift", false)).commit());
         rows.add("4K: " + (p.getBoolean("saver_4k", true) ? on : off));
+        actions.add(() -> p.edit().putBoolean("saver_4k", !p.getBoolean("saver_4k", true)).commit());
         rows.add(Strings.t("Use as TV screensaver") + ": " + (p.getBoolean("tv_saver", true) ? on : off));
-        final int next = (every + 1) % SAVER_EVERY.length;
+        actions.add(() -> p.edit().putBoolean("tv_saver", !p.getBoolean("tv_saver", true)).commit());
         panel(Strings.t("Screensaver"), rows, null, 0, row, which -> {}, which -> {
-            SharedPreferences.Editor e = p.edit();
             if (which == 0) {
                 showAmbient(true);
                 return;
-            } else if (which == 1) {
-                e.putString("showcase_every", SAVER_EVERY[next]);
-            } else if (which == 2) {
+            }
+            if (which == 2) {
                 showWallpaperScreen(null);
                 return;
-            } else if (which < 3 + OnlinePictures.SOURCES.length) {
-                String src = OnlinePictures.SOURCES[which - 3];
-                e.putBoolean("src_" + src, !OnlinePictures.enabled(this, src));
-            } else if (which == 6) {
-                e.putBoolean("saver_drift", !p.getBoolean("saver_drift", false));
-            } else if (which == 7) {
-                e.putBoolean("saver_4k", !p.getBoolean("saver_4k", true));
-            } else {
-                e.putBoolean("tv_saver", !p.getBoolean("tv_saver", true));
             }
-            e.commit();
+            actions.get(which).run();
             applySaver(this);
             OnlinePictures.refresh(this);
             showSaverSettings(which);
@@ -1317,7 +1330,7 @@ public class MainActivity extends Activity {
             });
             return;
         } else if (isInput(key)) {
-            openInput(key);
+            openInput(this, key);
             return;
         } else {
             i = launchIntent(getPackageManager(), key);
@@ -1338,21 +1351,36 @@ public class MainActivity extends Activity {
     // worked takes exactly the same path as before. The one exception: when the TV itself sends HDMI to
     // Google TV's input player, that goes first, because some Google TVs ship com.android.tv as a stub
     // that starts fine but only says "Hello World!" (issue #5).
-    private void openInput(String id) {
+    static void openInput(Context c, String id) {
+        TvInputManager tim = (TvInputManager) c.getSystemService(Context.TV_INPUT_SERVICE);
+        TvInputInfo info = tim == null ? null : tim.getTvInputInfo(id);
+        if (info != null && !info.isPassthroughInput()) {
+            Intent channels = new Intent(Intent.ACTION_VIEW).setDataAndType(TvContract.buildChannelsUriForInput(id),
+                    "vnd.android.cursor.dir/channel").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            for (String pkg : new String[] {"com.tcl.tv", LIVE_TV[0][0], LIVE_TV[1][0]}) {
+                try {
+                    c.startActivity(new Intent(channels).setPackage(pkg));
+                    return;
+                } catch (Exception ignored) {}
+            }
+            try { c.startActivity(channels); } catch (Exception ignored) {}
+            return;
+        }
+        PackageManager pm = c.getPackageManager();
         Intent view = new Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput(id));
         List<Intent> tries = new ArrayList<>();
-        ResolveInfo def = getPackageManager().resolveActivity(view, PackageManager.MATCH_DEFAULT_ONLY);
+        ResolveInfo def = pm.resolveActivity(view, PackageManager.MATCH_DEFAULT_ONLY);
         if (def != null && def.activityInfo != null && INPUT_PLAYER.equals(def.activityInfo.packageName))
             tries.add(new Intent(view).setClassName(INPUT_PLAYER, def.activityInfo.name));
         for (String[] live : LIVE_TV) {
             Intent t = new Intent(view).setClassName(live[0], live[1]);
-            if (t.resolveActivity(getPackageManager()) != null) tries.add(t);
+            if (t.resolveActivity(pm) != null) tries.add(t);
         }
         tries.add(view);
         for (Intent t : tries) {
             t.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
-                startActivity(t);
+                c.startActivity(t);
                 return;
             } catch (Exception ignored) {}
         }
@@ -1416,6 +1444,7 @@ public class MainActivity extends Activity {
         if (open.equals("control")) ui.post(() -> { if (controlCenter == null) showControlCenter(); });
         else if (open.equals("wallpapers")) ui.post(() -> showWallpaperScreen(null));
         else if (open.equals("saver")) ui.post(() -> showSaverSettings(0));
+        else if (open.equals("slideshow")) ui.post(() -> showAmbient(true));
     }
 
     // The chip at the top right: time and avatar on glass.
@@ -1436,9 +1465,8 @@ public class MainActivity extends Activity {
         npArt = new ImageView(this);
         npBox.addView(npArt, new LinearLayout.LayoutParams(px(44), px(44)));
         npText = text(px(22), 0xE6FFFFFF, regular);
-        npText.setSingleLine(true);
-        npText.setEllipsize(android.text.TextUtils.TruncateAt.END);
         npText.setMaxWidth(px(360));
+        scroll(npText);
         npText.setPadding(px(14), 0, px(10), 0);
         npBox.addView(npText);
         npState = new LineIcon(LineIcon.PLAY);
@@ -1544,6 +1572,8 @@ public class MainActivity extends Activity {
 
     // Control Center: a frosted panel on the right, like Apple TV's. Its glass is the wallpaper blurred
     // once, not live. The cog or Back closes it.
+    private int ccFocus = -1;
+
     private void showControlCenter() {
         if (controlCenter != null) {
             controlCenter.dismiss();
@@ -1599,16 +1629,22 @@ public class MainActivity extends Activity {
         // Wi-Fi, Bluetooth, Sound, Picture / Inputs, Screensaver, Alerts, Wallpaper / Settings, Apps.
         final int tile = (w - 2 * pad - 3 * gap) / 4;
         int net = networkState();
+        final boolean autoSaver = getSharedPreferences(PREFS, 0).getBoolean("auto_saver", true);
         int[][] icons = {LineIcon.WIFI, LineIcon.BLUETOOTH, LineIcon.SOUND, LineIcon.PICTURE, LineIcon.INPUT,
-                LineIcon.MOON, LineIcon.BELL, LineIcon.FRAME, LineIcon.SETTINGS, LineIcon.APPS};
+                LineIcon.MOON, LineIcon.BELL, LineIcon.FRAME, LineIcon.SETTINGS, LineIcon.APPS, LineIcon.HDMI};
         String[] labels = {net == OFFLINE ? Strings.t("Offline") : net == ETHERNET ? "Ethernet" : Strings.t("Wi-Fi"),
                 Strings.t("Bluetooth"), Strings.t("Sound"), Strings.t("Picture"), Strings.t("Inputs"),
-                Strings.t("Screensaver"), Strings.t("Alerts"), Strings.t("Wallpaper"), Strings.t("Settings"), Strings.t("Apps")};
+                Strings.t("Screensaver"), Strings.t("Alerts"), Strings.t("Wallpaper"), Strings.t("Settings"), Strings.t("Apps"),
+                Strings.t("Auto saver") + "\n" + Strings.t(autoSaver ? "On" : "Off")};
         Runnable[] actions = {this::openNetworkSettings, () -> openQuick("bluetooth"), () -> openQuick("sound"),
                 () -> openQuick("picture"), this::openInputs, () -> showSaverSettings(0), this::showNotifications,
-                () -> showWallpaperScreen(null), this::openTvSettings, this::showAllApps};
+                () -> showWallpaperScreen(null), this::openTvSettings, this::showAllApps, () -> {
+                    getSharedPreferences(PREFS, 0).edit().putBoolean("auto_saver", !autoSaver).commit();
+                    ccFocus = 10;
+                    ui.post(this::showControlCenter);
+                }};
         LinearLayout row = null;
-        View first = null;
+        View first = null, focusTile = null;
         for (int i = 0; i < icons.length; i++) {
             if (i % 4 == 0) {
                 row = new LinearLayout(this);
@@ -1623,6 +1659,7 @@ public class MainActivity extends Activity {
                 action.run();
             });
             if (i == 6) alertsTile = (TextView) ((ViewGroup) t).getChildAt(1);
+            if (i == ccFocus) focusTile = t;
             LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(tile, tile);
             if (i % 4 > 0) cp.leftMargin = gap;
             row.addView(t, cp);
@@ -1676,7 +1713,9 @@ public class MainActivity extends Activity {
         win.setAttributes(lp);
         win.setDimAmount(0.3f);
         d.show();
-        if (playPause != null) playPause.requestFocus();
+        ccFocus = -1;
+        if (focusTile != null) focusTile.requestFocus();
+        else if (playPause != null) playPause.requestFocus();
         else if (first != null) first.requestFocus();
     }
 
@@ -1691,19 +1730,36 @@ public class MainActivity extends Activity {
         bg.setCornerRadius(px(24));
         bg.setColor(0x1FFFFFFF);
         card.setBackground(bg);
+        LinearLayout item = new LinearLayout(this);
+        item.setGravity(Gravity.CENTER_VERTICAL);
+        item.setContentDescription("nowplaying-open");
+        item.setPadding(px(8), px(8), px(8), px(8));
+        final GradientDrawable ib = new GradientDrawable();
+        ib.setCornerRadius(px(18));
+        ib.setColor(Color.TRANSPARENT);
+        item.setBackground(ib);
+        item.setFocusable(true);
+        item.setOnFocusChangeListener((v, has) -> ib.setColor(has ? 0x33FFFFFF : Color.TRANSPARENT));
+        item.setOnClickListener(v -> {
+            android.media.session.MediaController m = NowPlaying.current(this);
+            Intent li = m == null ? null : launchIntent(getPackageManager(), m.getPackageName());
+            if (li == null) return;
+            d.dismiss();
+            try { startActivity(li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) {}
+        });
         final ImageView art = new ImageView(this);
-        card.addView(art, new LinearLayout.LayoutParams(px(88), px(88)));
+        item.addView(art, new LinearLayout.LayoutParams(px(88), px(88)));
         LinearLayout words = new LinearLayout(this);
         words.setOrientation(LinearLayout.VERTICAL);
-        words.setPadding(px(18), 0, px(12), 0);
+        words.setPadding(px(18), 0, px(4), 0);
         final TextView title = text(px(24), Color.WHITE, semibold);
         final TextView artist = text(px(20), 0xB3FFFFFF, regular);
         for (TextView t : new TextView[] {title, artist}) {
-            t.setSingleLine(true);
-            t.setEllipsize(android.text.TextUtils.TruncateAt.END);
-            words.addView(t);
+            scroll(t);
+            words.addView(t, new LinearLayout.LayoutParams(-1, -2));
         }
-        card.addView(words, new LinearLayout.LayoutParams(0, -2, 1f));
+        item.addView(words, new LinearLayout.LayoutParams(0, -2, 1f));
+        card.addView(item, new LinearLayout.LayoutParams(0, -2, 1f));
         final LineIcon state = new LineIcon(LineIcon.PAUSE);
         View prev = mediaButton(new LineIcon(LineIcon.PREVIOUS), "previous",
                 () -> { android.media.session.MediaController m = NowPlaying.current(this); if (m != null) m.getTransportControls().skipToPrevious(); });
@@ -1737,6 +1793,14 @@ public class MainActivity extends Activity {
             @Override public void onViewDetachedFromWindow(View v) { NowPlaying.unlisten(MainActivity.this, update); }
         });
         return pp;
+    }
+
+    private void scroll(TextView t) {
+        t.setSingleLine(true);
+        t.setEllipsize(android.text.TextUtils.TruncateAt.MARQUEE);
+        t.setMarqueeRepeatLimit(-1);
+        t.setHorizontalFadingEdgeEnabled(true);
+        t.setSelected(true);
     }
 
     private View mediaButton(final LineIcon icon, String desc, final Runnable action) {
@@ -1774,7 +1838,7 @@ public class MainActivity extends Activity {
         t.addView(iv, new LinearLayout.LayoutParams(px(40), px(40)));
         final TextView tv = text(px(18), 0xE6FFFFFF, regular);
         tv.setText(label);
-        tv.setSingleLine(true);
+        tv.setMaxLines(label.indexOf('\n') >= 0 ? 2 : 1);
         tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
         tv.setGravity(Gravity.CENTER);
         tv.setPadding(px(6), px(8), px(6), 0);

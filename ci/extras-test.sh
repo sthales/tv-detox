@@ -2,7 +2,7 @@
 # Checks the fork's additions on a TV that already runs this home. Unlike smoke-test.sh it never
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
-# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream pinned rebind nowplaying. Name one to run only that.
+# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream pinned autosaver sound rebind nowplaying. Name one to run only that.
 # The enabled accessibility services and all the home's settings are put back afterwards (settings export/import).
 #   sh ci/extras-test.sh <TV> postboot   right after a real restart, before any script: checks only
 set -e
@@ -394,10 +394,15 @@ t_saver() {
     --es stamp "sv$(date +%s)" >/dev/null; sleep 1
   sh_tv am start -n $ME/.MainActivity --es open saver >/dev/null; sleep 2
   x=$(ui)
-  for t in 'Start now' 'Change picture: every 1 min' 'Places: Off' 'Earth: Off' 'Space: Off' 'Drift: Off' '4K: On' 'Use as TV screensaver'; do
+  for t in 'Start now' 'Change picture: every 1 min' 'Places: Off' 'Earth: Off' 'Space: Off'; do
     echo "$x" | grep -q "text=\"$t" || fail "the Screensaver panel has no '$t'"
   done
-  for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(picked)" = "Drift: Off" ] && break; sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 0.5; done
+  for _ in 1 2 3 4 5 6 7 8 9 10 11; do sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 0.3; done; sleep 1
+  x=$(ui)
+  for t in 'Drift: Off' '4K: On' 'Use as TV screensaver'; do
+    echo "$x" | grep -q "text=\"$t" || fail "the Screensaver panel has no '$t'"
+  done
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(picked)" = "Drift: Off" ] && break; sh_tv input keyevent KEYCODE_DPAD_UP; sleep 0.5; done
   [ "$(picked)" = "Drift: Off" ] || fail "couldn't reach Drift (on: $(picked))"
   sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
   [ "$(picked)" = "Drift: On" ] || fail "OK on Drift didn't switch it on and stay on the row (on: $(picked))"
@@ -477,7 +482,11 @@ t_nowplaying() {
   [ "$(pkg_state "$P")" = "$flip" ] || fail "play/pause didn't take $P from $was to $flip ($(pkg_state "$P"))"
   sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 3
   [ "$(pkg_state "$P")" = "$was" ] || fail "play/pause didn't take $P back to $was ($(pkg_state "$P"))"
-  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  for _ in 1 2 3; do [ "$(focused_desc)" = nowplaying-open ] && break; sh_tv input keyevent KEYCODE_DPAD_LEFT; sleep 0.5; done
+  [ "$(focused_desc)" = nowplaying-open ] || fail "can't select the playing item in the card (on: $(focused_desc))"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 4
+  focus | grep -q "$P" || fail "OK on the playing item didn't open $P ($(focus))"
+  home
 }
 focused_desc() { ui | grep -o '<node [^>]*focused="true"[^>]*>' | grep -o 'content-desc="[^"]*"' | head -1 | sed 's/content-desc="\(.*\)"/\1/'; }
 
@@ -490,6 +499,63 @@ t_dream() {
   sh_tv am start -n $ME/.MainActivity --es tv_saver on --es stamp "d2$(date +%s)" >/dev/null; sleep 2
   [ "$(saver_now)" = "$ME/.Dream" ] || fail "screensaver didn't come back to ours ($(saver_now))"
   sh_tv dumpsys package $ME | grep -q 'android.service.dreams.DreamService' || fail "Dream service isn't declared"
+}
+
+to_autosaver() {
+  for _ in 1 2 3 4 5 6; do
+    case "$(focused)" in
+      "Auto saver"*) return ;;
+      Settings) sh_tv input keyevent KEYCODE_DPAD_RIGHT; sleep 0.4; sh_tv input keyevent KEYCODE_DPAD_RIGHT; sleep 1; return ;;
+      Apps) sh_tv input keyevent KEYCODE_DPAD_RIGHT; sleep 1; return ;;
+    esac
+    sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 0.5
+  done
+}
+saver_pref() { settings export; sh_tv cat $FILES/settings.json | grep -o '"auto_saver": [a-z]*' | cut -d' ' -f2; }
+t_autosaver() {
+  sh_tv input keyevent 83; sleep 3
+  to_autosaver
+  ui | grep -q 'text="Auto saver' || fail "Control Center has no Auto saver tile"
+  [ "$(focused)" = "Auto saver
+On" ] || [ "$(focused | head -1)" = "Auto saver" ] || fail "couldn't reach the Auto saver tile (on: $(focused))"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 3
+  focused | grep -q Off || fail "the tile didn't switch to Off and keep focus (on: $(focused))"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  [ "$(saver_pref)" = false ] || fail "Auto saver off wasn't saved ($(saver_pref))"
+  sh_tv input keyevent 83; sleep 3
+  to_autosaver
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 3
+  focused | grep -q On || fail "the tile didn't switch back On (on: $(focused))"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  [ "$(saver_pref)" = true ] || fail "Auto saver on wasn't saved ($(saver_pref))"
+  sh_tv am start -n $ME/.MainActivity --es open slideshow >/dev/null; sleep 3
+  ambient_on || fail "open=slideshow didn't start the slideshow"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+}
+
+our_uid() { sh_tv pm list packages -U $ME | grep -o 'uid:[0-9]*' | cut -d: -f2; }
+sound_playing() { u=$(our_uid); sh_tv dumpsys audio | awk '/players:/{f=1} /ducked players/{f=0} f' | grep "u/pid:$u/" | grep -q 'state:started'; }
+t_sound() {
+  sh_tv ls $FILES/sounds/ 2>/dev/null | grep -q . || fail "no sounds on the TV (push assets/sounds first)"
+  s1=$(sh_tv ls $FILES/sounds/ | head -1)
+  sh_tv am start -n $ME/.MainActivity --es saver_sound "\"$s1\"" --es saver_volume 10 --es stamp "snd$(date +%s)" >/dev/null; sleep 2
+  sh_tv am start -n $ME/.MainActivity --es open saver >/dev/null; sleep 2
+  x=$(ui)
+  echo "$x" | grep -q 'text="Sound: ' || fail "the Screensaver panel has no Sound row"
+  echo "$x" | grep -q 'text="Volume: 10%' || fail "the Screensaver panel has no Volume row at 10%"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  home
+  sh_tv input keyevent KEYCODE_BACK; sleep 2
+  ambient_on || fail "Back didn't start the slideshow"
+  sound_playing && fail "the sound started before the 5 s wait"
+  sleep 8
+  sound_playing || fail "the sound didn't start ~5 s into the slideshow"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 4
+  sound_playing && fail "the sound kept playing after the slideshow ended"
+  sh_tv am start -n $ME/.MainActivity --es saver_sound off --es stamp "snd0$(date +%s)" >/dev/null; sleep 1
+  home; sh_tv input keyevent KEYCODE_BACK; sleep 9
+  sound_playing && fail "the sound plays with Sound set to Off"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
 }
 
 bound_homes() { sh_tv dumpsys accessibility | awk '/Bound services/{f=1} f&&/Enabled services/{exit} f' | grep -o 'label=Home' | wc -l | tr -d ' '; }
@@ -522,7 +588,7 @@ restore_all() {
 }
 trap restore_all EXIT
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream pinned rebind nowplaying; do
+for t in baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream pinned autosaver sound rebind nowplaying; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"

@@ -13,6 +13,8 @@ public class ConfigTest {
         controllersAreNotRemapped();
         bannerFileMatchesThePackageOnly();
         inputIdsBecomeFileNames();
+        slideshowWhenTheWatchedSourceGoesAway();
+        soundFilesByExtension();
         rotationIntervalsParse();
         rotationCyclesThroughTheChosenOnly();
         rotationIsDueAfterTheInterval();
@@ -60,6 +62,23 @@ public class ConfigTest {
         assert Config.fromController(0x401);       // SOURCE_GAMEPAD
         assert Config.fromController(0x1000010);   // SOURCE_JOYSTICK
         assert Config.fromController(0x501);       // keyboard | gamepad, how many pads report
+    }
+
+    static void soundFilesByExtension() {
+        assert Config.isSound("gta5-loading.m4a");
+        assert Config.isSound("Rain.MP3");
+        assert !Config.isSound("cover.jpg");
+        assert !Config.isSound("m4a");
+    }
+
+    static void slideshowWhenTheWatchedSourceGoesAway() {
+        assert Config.slideshowOnSourceLost(0, 1, "com.tcl.tv", true);
+        assert Config.slideshowOnSourceLost(0, 2, "com.tcl.tv", true);
+        assert !Config.slideshowOnSourceLost(0, 1, "com.tcl.tv", false);
+        assert !Config.slideshowOnSourceLost(0, 1, "com.netflix.ninja", true);
+        assert !Config.slideshowOnSourceLost(1, 2, "com.tcl.tv", true);
+        assert !Config.slideshowOnSourceLost(1, 0, "com.tcl.tv", true);
+        assert !Config.slideshowOnSourceLost(0, 1, null, true);
     }
 
     static void inputIdsBecomeFileNames() {

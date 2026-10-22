@@ -13,7 +13,7 @@ case "$TV" in *:*) adb connect "$TV" >/dev/null 2>&1 || true ;; esac
 
 FILES=/sdcard/Android/data/com.ansub.tvhome/files
 adb -s "$TV" shell "[ -d $FILES ] || { am start -n com.ansub.tvhome/.MainActivity >/dev/null; sleep 2; }"
-for d in wallpapers banners; do
+for d in wallpapers banners sounds; do
   [ -d "$IN/$d" ] && adb -s "$TV" push "$IN/$d" $FILES/ >/dev/null
 done
 for a in "$IN"/avatar.*; do [ -f "$a" ] && adb -s "$TV" push "$a" $FILES/ >/dev/null; done

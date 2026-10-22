@@ -67,10 +67,12 @@ final class Showcase extends FrameLayout {
     private boolean curFit, nxtFit;
     private float curT, nxtT, fade = 1f;
     private ValueAnimator fader, mover;
+    private final Ambience ambience;
 
     Showcase(Context c, Source source, android.graphics.Typeface regular, android.graphics.Typeface semibold) {
         super(c);
         this.source = source;
+        ambience = new Ambience(c);
         scale = getResources().getDisplayMetrics().widthPixels / 1920f;
         setBackgroundColor(Color.BLACK);
         setContentDescription("ambient");
@@ -131,6 +133,7 @@ final class Showcase extends FrameLayout {
         slides = new ArrayList<>(source.slides());
         Collections.shuffle(slides);
         go(1);
+        ambience.start();
     }
 
     boolean key(android.view.KeyEvent e) {
@@ -159,6 +162,7 @@ final class Showcase extends FrameLayout {
     }
 
     void stop() {
+        ambience.stop();
         running = false;
         ui.removeCallbacksAndMessages(null);
         for (int i = 0; i < 2; i++) {
