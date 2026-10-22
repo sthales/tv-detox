@@ -534,55 +534,11 @@ public class MainActivity extends Activity {
         }
     }
 
-    // The wallpapers, each with a small dot of its colours or of the picture, after a "Rotate" row.
-    // Moving through the list shows each one behind the panel; OK keeps it, Back goes back to the one
-    // before. Hold OK (or Menu) on one to add it to the rotation (marked ↻), take it out, or delete a
-    // picture. Dots and previews are decoded in the background, and dots are kept on disk.
-    private void showWallpapers(String focus) {
-        final int size = px(40);
-        final List<String> names = wallpapers();
-        final java.util.Set<String> rotation = Config.splitSet(getSharedPreferences(PREFS, 0).getString("rotation", null));
-        List<String> labels = new ArrayList<>();
-        labels.add(Strings.t("Rotate") + ": " + Strings.t(ROTATE_LABELS[rotateChoice()]));
-        for (String n : names)
-            labels.add((n.startsWith(IMAGE) ? n.substring(IMAGE.length()) : n) + (rotation.contains(n) ? "  \u21BB" : ""));
-        int at = names.indexOf(focus != null ? focus : wallpaper());
-        final BaseAdapter[] list = new BaseAdapter[1];
-        list[0] = panel(Strings.t("Wallpaper"), labels, pos -> {
-            if (pos == 0) return new ColorDrawable(Color.TRANSPARENT);
-            String n = names.get(pos - 1);
-            if (n.startsWith(IMAGE)) return thumb(new File(images(), n.substring(IMAGE.length())), size, list);
-            int[] c = WALLPAPERS[pos - 1];
-            GradientDrawable dot = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                    new int[] {glow(c[3], c[0]), c[1], glow(c[4], c[0])});
-            dot.setShape(GradientDrawable.OVAL);
-            dot.setStroke(Math.max(1, px(2)), 0x26FFFFFF);
-            dot.setSize(size, size);
-            return dot;
-        }, size, at < 0 ? 1 : at + 1, pos -> {
-            // Wait for the arrows to settle, so holding one doesn't decode every picture it passes.
-            ui.removeCallbacks(pendingPreview);
-            if (pos == 0) return;
-            previewing = names.get(pos - 1);
-            pendingPreview = () -> preview(names.get(pos - 1));
-            ui.postDelayed(pendingPreview, 150);
-        }, which -> {
-            ui.removeCallbacks(pendingPreview);
-            previewing = null;
-            showWallpaper(wallpaper());
-            if (which == 0) {
-                showRotateChoices();
-                return;
-            }
-            getSharedPreferences(PREFS, 0).edit().putString("wallpaper", names.get(which - 1)).apply();
-            showWallpaper(names.get(which - 1));
-        }, which -> {
-            ui.removeCallbacks(pendingPreview);
-            previewing = null;
-            showWallpaper(wallpaper());
-            if (which > 0) showWallpaperMenu(names.get(which - 1));
-        });
-    }
+    // The Wallpaper screen: rotation interval chips, a grid of every wallpaper and an action bar for
+    // the focused one. Moving through the grid previews each wallpaper behind the screen; OK (or Set
+    // as wallpaper) keeps it, Back puts the saved one back. ✓ marks the current one, ↻ the rotation.
+    private Dialog wallScreen;
+    private String wallSelected;
 
     private static final String[] ROTATE_LABELS = {"Off", "30 min", "1 hour", "4 hours", "12 hours", "24 hours", "1 week"};
 
@@ -591,49 +547,263 @@ public class MainActivity extends Activity {
         return Math.max(0, i);
     }
 
-    private void showRotateChoices() {
-        List<String> labels = new ArrayList<>();
-        for (String l : ROTATE_LABELS) labels.add(Strings.t(l));
-        panel(Strings.t("Rotate"), labels, null, 0, rotateChoice(), pos -> {}, which -> {
-            getSharedPreferences(PREFS, 0).edit().putString("rotate", Config.ROTATE_CHOICES[which])
-                    .putLong("rotate_at", System.currentTimeMillis()).apply();
-            rotateIfDue();
-            showWallpapers(null);
-        }, null);
+    private java.util.Set<String> rotationSet() {
+        return Config.splitSet(getSharedPreferences(PREFS, 0).getString("rotation", null));
     }
 
-    // Hold OK on a wallpaper: in or out of the rotation, and Delete for a picture (asks first).
-    private void showWallpaperMenu(final String name) {
-        final java.util.Set<String> rotation = Config.splitSet(getSharedPreferences(PREFS, 0).getString("rotation", null));
-        final boolean in = rotation.contains(name);
-        final boolean picture = name.startsWith(IMAGE);
-        final String label = picture ? name.substring(IMAGE.length()) : name;
-        List<String> items = new ArrayList<>();
-        items.add(Strings.t(in ? "Remove from rotation" : "Add to rotation"));
-        if (picture) items.add(Strings.t("Delete"));
-        panel(label, items, which -> {
-            if (which == 0) {
-                if (in) rotation.remove(name);
-                else rotation.add(name);
-                getSharedPreferences(PREFS, 0).edit().putString("rotation", Config.joinSet(rotation)).apply();
+    private void showWallpaperScreen(String focus) {
+        if (wallScreen != null) wallScreen.dismiss();
+        final Dialog d = new Dialog(this, android.R.style.Theme_Material_NoActionBar_Fullscreen);
+        wallScreen = d;
+        final List<String> names = wallpapers();
+        wallSelected = focus != null && names.contains(focus) ? focus : wallpaper();
+
+        FrameLayout frame = new FrameLayout(this);
+        frame.setContentDescription("wallpaper-screen");
+        View shade = new View(this);
+        shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {0xD9000000, 0x59000000, 0x59000000, 0xF2000000}));
+        frame.addView(shade, new FrameLayout.LayoutParams(-1, -1));
+
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        col.setPadding(px(MARGIN), px(56), px(MARGIN), px(44));
+        frame.addView(col, new FrameLayout.LayoutParams(-1, -1));
+
+        TextView title = text(px(44), Color.WHITE, semibold);
+        title.setText(Strings.t("Wallpaper"));
+        col.addView(title);
+
+        // Rotate: Off, 30 min … 1 week.
+        LinearLayout chips = new LinearLayout(this);
+        chips.setGravity(Gravity.CENTER_VERTICAL);
+        chips.setPadding(0, px(18), 0, px(24));
+        TextView rl = text(px(24), 0xB3FFFFFF, regular);
+        rl.setText(Strings.t("Rotate"));
+        rl.setPadding(0, 0, px(20), 0);
+        chips.addView(rl);
+        final List<TextView> chipViews = new ArrayList<>();
+        for (int i = 0; i < ROTATE_LABELS.length; i++) {
+            final int which = i;
+            TextView c = pill(Strings.t(ROTATE_LABELS[i]), px(22));
+            c.setOnClickListener(v -> {
+                getSharedPreferences(PREFS, 0).edit().putString("rotate", Config.ROTATE_CHOICES[which])
+                        .putLong("rotate_at", System.currentTimeMillis()).apply();
                 rotateIfDue();
-                showWallpapers(name);
-                return;
+                for (int k = 0; k < chipViews.size(); k++) markPill(chipViews.get(k), k == which, chipViews.get(k).hasFocus());
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.rightMargin = px(12);
+            chips.addView(c, lp);
+            chipViews.add(c);
+        }
+        for (int k = 0; k < chipViews.size(); k++) markPill(chipViews.get(k), k == rotateChoice(), false);
+        col.addView(chips);
+
+        // The grid, five across, scrolling when there are more rows than fit.
+        ScrollView sv = new ScrollView(this);
+        sv.setVerticalScrollBarEnabled(false);
+        sv.setClipChildren(false);
+        sv.setClipToPadding(false);
+        sv.setPadding(0, px(16), 0, px(16));
+        LinearLayout grid = new LinearLayout(this);
+        grid.setOrientation(LinearLayout.VERTICAL);
+        grid.setClipChildren(false);
+        sv.addView(grid);
+        col.addView(sv, new LinearLayout.LayoutParams(-1, 0, 1f));
+        final int across = 5, gap = px(28);
+        final int tw = (getResources().getDisplayMetrics().widthPixels - 2 * px(MARGIN) - (across - 1) * gap) / across;
+        final int th = tw * 9 / 16;
+        final List<View> thumbViews = new ArrayList<>();
+        final List<TextView> badges = new ArrayList<>();
+        LinearLayout row = null;
+        View focusView = null;
+
+        // Set as wallpaper / In rotation / Delete, for the focused thumbnail.
+        LinearLayout bar = new LinearLayout(this);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        bar.setPadding(0, px(20), 0, 0);
+        final TextView setBtn = pill(Strings.t("Set as wallpaper"), px(24));
+        final TextView rotBtn = pill("", px(24));
+        final TextView delBtn = pill(Strings.t("Delete"), px(24));
+        for (TextView b : new TextView[] {setBtn, rotBtn, delBtn}) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+            lp.rightMargin = px(16);
+            bar.addView(b, lp);
+        }
+        final Runnable refresh = () -> {
+            java.util.Set<String> rot = rotationSet();
+            rotBtn.setText(rot.contains(wallSelected) ? Strings.t("In rotation") + " ✓" : Strings.t("Add to rotation"));
+            delBtn.setVisibility(wallSelected.startsWith(IMAGE) ? View.VISIBLE : View.GONE);
+            String current = wallpaper();
+            for (int i = 0; i < names.size(); i++) {
+                String n = names.get(i), mark = (n.equals(current) ? "✓ " : "") + (rot.contains(n) ? "↻" : "");
+                badges.get(i).setText(mark.trim());
+                badges.get(i).setVisibility(mark.trim().isEmpty() ? View.GONE : View.VISIBLE);
             }
-            panel(String.format(Strings.t("Delete %s?"), label), java.util.Arrays.asList(Strings.t("Delete"), Strings.t("Cancel")), confirm -> {
-                if (confirm != 0) {
-                    showWallpapers(name);
-                    return;
-                }
+        };
+        for (int i = 0; i < names.size(); i++) {
+            if (i % across == 0) {
+                row = new LinearLayout(this);
+                row.setClipChildren(false);
+                LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, -2);
+                if (i > 0) rp.topMargin = gap;
+                grid.addView(row, rp);
+            }
+            final String n = names.get(i);
+            TextView badge = text(px(22), Color.WHITE, semibold);
+            View t = wallThumb(n, tw, th, badge, () -> {
+                wallSelected = n;
+                refresh.run();
+                ui.removeCallbacks(pendingPreview);
+                previewing = n;
+                pendingPreview = () -> preview(n);
+                ui.postDelayed(pendingPreview, 150);
+            }, () -> {
+                setWallpaperTo(n);
+                refresh.run();
+            });
+            badges.add(badge);
+            thumbViews.add(t);
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(tw, -2);
+            if (i % across > 0) cp.leftMargin = gap;
+            row.addView(t, cp);
+            if (n.equals(wallSelected)) focusView = t;
+        }
+        setBtn.setOnClickListener(v -> {
+            setWallpaperTo(wallSelected);
+            refresh.run();
+        });
+        rotBtn.setOnClickListener(v -> {
+            java.util.Set<String> rot = rotationSet();
+            if (!rot.remove(wallSelected)) rot.add(wallSelected);
+            getSharedPreferences(PREFS, 0).edit().putString("rotation", Config.joinSet(rot)).apply();
+            rotateIfDue();
+            refresh.run();
+        });
+        delBtn.setOnClickListener(v -> {
+            final String n = wallSelected;
+            final String label = n.substring(IMAGE.length());
+            panel(String.format(Strings.t("Delete %s?"), label), Arrays.asList(Strings.t("Delete"), Strings.t("Cancel")), confirm -> {
+                if (confirm != 0) return;
                 new File(images(), label).delete();
-                rotation.remove(name);
-                SharedPreferences.Editor e = getSharedPreferences(PREFS, 0).edit().putString("rotation", Config.joinSet(rotation));
-                if (name.equals(wallpaper())) e.putString("wallpaper", WALLPAPER_NAMES[0]);
+                java.util.Set<String> rot = rotationSet();
+                rot.remove(n);
+                SharedPreferences.Editor e = getSharedPreferences(PREFS, 0).edit().putString("rotation", Config.joinSet(rot));
+                if (n.equals(wallpaper())) e.putString("wallpaper", WALLPAPER_NAMES[0]);
                 e.apply();
                 showWallpaper(wallpaper());
-                showWallpapers(null);
+                showWallpaperScreen(null);
             });
         });
+        col.addView(bar);
+        refresh.run();
+
+        d.setContentView(frame);
+        d.setOnDismissListener(di -> {
+            ui.removeCallbacks(pendingPreview);
+            previewing = null;
+            if (wallScreen == d) {
+                wallScreen = null;
+                scroller.setVisibility(View.VISIBLE);
+            }
+            showWallpaper(wallpaper());
+        });
+        scroller.setVisibility(View.INVISIBLE); // only the previewed wallpaper behind the screen
+        Window win = d.getWindow();
+        win.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        win.setDimAmount(0f);
+        d.show();
+        if (focusView != null) focusView.requestFocus();
+    }
+
+    private void setWallpaperTo(String name) {
+        getSharedPreferences(PREFS, 0).edit().putString("wallpaper", name).apply();
+        showWallpaper(name);
+    }
+
+    // A rounded text button on glass; focused it turns white with dark text, like the controls.
+    private TextView pill(String label, int size) {
+        final TextView t = text(size, Color.WHITE, regular);
+        t.setText(label);
+        t.setSingleLine(true);
+        t.setPadding(px(26), px(12), px(26), px(12));
+        t.setFocusable(true);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(px(40));
+        t.setBackground(bg);
+        t.setTag(Boolean.FALSE);
+        markPill(t, false, false);
+        t.setOnFocusChangeListener((v, has) -> {
+            markPill(t, Boolean.TRUE.equals(t.getTag()), has);
+            v.animate().scaleX(has ? 1.06f : 1f).scaleY(has ? 1.06f : 1f).setDuration(120).start();
+        });
+        return t;
+    }
+
+    // chosen: the active choice (a soft white tint); focused: solid white.
+    private void markPill(TextView t, boolean chosen, boolean focused) {
+        t.setTag(chosen);
+        GradientDrawable bg = (GradientDrawable) t.getBackground();
+        bg.setColor(focused ? 0xF2FFFFFF : chosen ? 0x52FFFFFF : 0x1FFFFFFF);
+        bg.setStroke(chosen && !focused ? Math.max(1, px(2)) : 0, 0xB3FFFFFF);
+        t.setTextColor(focused ? 0xFF1C1820 : Color.WHITE);
+    }
+
+    // One grid thumbnail: the gradient or picture, a ✓/↻ badge, the name under it when focused.
+    private View wallThumb(final String name, int w, int h, TextView badge, final Runnable onFocus, final Runnable onPick) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setClipChildren(false);
+        final FrameLayout card = new FrameLayout(this);
+        card.setContentDescription("thumb:" + name);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(px(RADIUS));
+        bg.setColor(0xFF1E1A1C);
+        card.setBackground(bg);
+        card.setClipToOutline(true);
+        final ImageView iv = new ImageView(this);
+        iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        if (name.startsWith(IMAGE)) {
+            Drawable ready = thumb(new File(images(), name.substring(IMAGE.length())), w, h,
+                    () -> { Drawable dd = thumb(new File(images(), name.substring(IMAGE.length())), w, h, null); if (dd != null) iv.setImageDrawable(dd); });
+            if (ready != null) iv.setImageDrawable(ready);
+        } else {
+            Bitmap b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            flatten(background(WALLPAPERS[Math.max(0, Arrays.asList(WALLPAPER_NAMES).indexOf(name))]), b);
+            iv.setImageBitmap(b);
+        }
+        card.addView(iv, new FrameLayout.LayoutParams(-1, -1));
+        GradientDrawable bb = new GradientDrawable();
+        bb.setCornerRadius(px(16));
+        bb.setColor(0xB3000000);
+        badge.setBackground(bb);
+        badge.setPadding(px(12), px(2), px(12), px(4));
+        FrameLayout.LayoutParams blp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
+        blp.setMargins(0, px(10), px(10), 0);
+        card.addView(badge, blp);
+        final GradientDrawable ring = new GradientDrawable();
+        ring.setCornerRadius(px(RADIUS));
+        ring.setStroke(px(4), Color.TRANSPARENT);
+        card.setForeground(ring);
+        card.setFocusable(true);
+        final TextView label = text(px(20), 0xE6FFFFFF, regular);
+        label.setText(name.startsWith(IMAGE) ? name.substring(IMAGE.length()) : name);
+        label.setSingleLine(true);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        label.setGravity(Gravity.CENTER);
+        label.setPadding(0, px(14), 0, 0);
+        label.setVisibility(View.INVISIBLE);
+        card.setOnFocusChangeListener((v, has) -> {
+            ring.setStroke(px(4), has ? Color.WHITE : Color.TRANSPARENT);
+            label.setVisibility(has ? View.VISIBLE : View.INVISIBLE);
+            v.animate().scaleX(has ? 1.08f : 1f).scaleY(has ? 1.08f : 1f).translationZ(has ? px(20) : 0).setDuration(140).start();
+            if (has) onFocus.run();
+        });
+        card.setOnClickListener(v -> onPick.run());
+        box.addView(card, new LinearLayout.LayoutParams(w, h));
+        box.addView(label, new LinearLayout.LayoutParams(w, -2));
+        return box;
     }
 
     // Rotation: while the home is in front, every interval it moves to the next wallpaper marked for
@@ -676,10 +846,10 @@ public class MainActivity extends Activity {
         return f.getPath() + "@" + f.lastModified();
     }
 
-    // A picture's dot for the list: from memory, else from the disk cache, else decoded in the
-    // background (then saved) while the row shows nothing; the list redraws when it's ready.
-    private Drawable thumb(final File f, final int size, final BaseAdapter[] list) {
-        final String key = f.getName() + "@" + f.lastModified() + "@" + size;
+    // A picture's thumbnail: from memory, else from the disk cache, else decoded in the background
+    // (then saved). Null until it's ready; then ready runs on the main thread.
+    private Drawable thumb(final File f, final int w, final int h, final Runnable ready) {
+        final String key = f.getName() + "@" + f.lastModified() + "@" + w + "x" + h;
         synchronized (thumbs) {
             if (thumbs.containsKey(key)) return thumbs.get(key);
             thumbs.put(key, null);
@@ -688,7 +858,7 @@ public class MainActivity extends Activity {
         decoder.execute(() -> {
             Bitmap b = cached.exists() ? BitmapFactory.decodeFile(cached.getPath()) : null;
             if (b == null) {
-                b = crop(f, size, size);
+                b = crop(f, w, h);
                 cached.getParentFile().mkdirs();
                 if (b != null) try (java.io.FileOutputStream out = new java.io.FileOutputStream(cached)) {
                     b.compress(Bitmap.CompressFormat.PNG, 100, out);
@@ -696,7 +866,7 @@ public class MainActivity extends Activity {
             }
             final Drawable d = b == null ? new ColorDrawable(Color.TRANSPARENT) : new BitmapDrawable(getResources(), b);
             synchronized (thumbs) { thumbs.put(key, d); }
-            ui.post(() -> { if (list[0] != null) list[0].notifyDataSetChanged(); });
+            if (ready != null) ui.post(ready);
         });
         return null;
     }
@@ -928,7 +1098,7 @@ public class MainActivity extends Activity {
                 items[SETTINGS_ITEMS.length] = "Show hidden inputs";
             }
             dropdown(tile(SETTINGS), items, which -> {
-                if (which == 0) showWallpapers(null);
+                if (which == 0) showWallpaperScreen(null);
                 else if (which == 1) openBrightness();
                 else if (which == 2) openTvSettings();
                 else saveHiddenInputs(new java.util.LinkedHashSet<String>());
@@ -1026,10 +1196,13 @@ public class MainActivity extends Activity {
     }
 
     // --es open control (the cog from inside another app, through KeyService): show Control Center.
+    // --es open wallpapers: the Wallpaper screen.
     private void openFrom(Intent intent) {
-        if (intent == null || !"control".equals(intent.getStringExtra("open"))) return;
+        String open = intent == null ? null : intent.getStringExtra("open");
+        if (open == null) return;
         intent.removeExtra("open");
-        ui.post(() -> { if (controlCenter == null) showControlCenter(); });
+        if (open.equals("control")) ui.post(() -> { if (controlCenter == null) showControlCenter(); });
+        else if (open.equals("wallpapers")) ui.post(() -> showWallpaperScreen(null));
     }
 
     // The chip at the top right: time and avatar on glass.
@@ -1169,7 +1342,7 @@ public class MainActivity extends Activity {
                 Strings.t("Screensaver"), Strings.t("Alerts"), Strings.t("Wallpaper"), Strings.t("Settings"), Strings.t("Apps")};
         Runnable[] actions = {this::openNetworkSettings, () -> openQuick("bluetooth"), () -> openQuick("sound"),
                 () -> openQuick("picture"), this::openInputs, () -> showAmbient(true), this::showNotifications,
-                () -> showWallpapers(null), this::openTvSettings, this::showAllApps};
+                () -> showWallpaperScreen(null), this::openTvSettings, this::showAllApps};
         LinearLayout row = null;
         View first = null;
         for (int i = 0; i < icons.length; i++) {

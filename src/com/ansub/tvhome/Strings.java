@@ -16,6 +16,7 @@ final class Strings {
         "Rotate", "Off", "30 min", "1 hour", "4 hours", "12 hours", "24 hours", "1 week",
         "Add to rotation", "Remove from rotation", "Delete", "Delete %s?", "Cancel",
         "Wi-Fi", "Bluetooth", "Inputs", "Screensaver", "Alerts", "Controls", "more",
+        "In rotation", "Set as wallpaper",
     };
 
     // Keyed by language ("de"), or language-country ("zh-TW") where a country writes it differently.

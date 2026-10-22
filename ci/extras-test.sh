@@ -2,7 +2,7 @@
 # Checks the fork's additions on a TV that already runs this home. Unlike smoke-test.sh it never
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
-# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control rows. Name one to run only that.
+# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control rows wallscreen. Name one to run only that.
 # The enabled accessibility services and the wallpaper are put back afterwards. The key map is reset to
 # extras.sh's default and hidden HDMI inputs are shown again (the app's settings can't be read from adb).
 #   sh ci/extras-test.sh <TV> postboot   right after a real restart, before any script: checks only
@@ -262,21 +262,34 @@ t_rotate() {
   shown | grep -q "wallpaper:$was" || fail "rotation kept going after Off: $(shown)"
 }
 
-# Delete from the TV: Settings > Wallpaper, hold OK on the picture, Delete, confirm.
+# The Wallpaper screen: rotation chips, a thumbnail grid and an action bar, no hidden hold-OK menus.
+t_wallscreen() {
+  home
+  sh_tv am start -n $ME/.MainActivity --es open wallpapers >/dev/null; sleep 3
+  x=$(ui)
+  echo "$x" | grep -q 'content-desc="wallpaper-screen"' || fail "open=wallpapers didn't show the Wallpaper screen"
+  for t in Off "30 min" "1 hour" "1 week" "Set as wallpaper"; do echo "$x" | grep -q "text=\"$t" || fail "Wallpaper screen has no '$t'"; done
+  echo "$x" | grep -qE 'text="(In rotation|Add to rotation)' || fail "no rotation button"
+  n=$(echo "$x" | grep -o 'content-desc="thumb:' | wc -l | tr -d ' ')
+  [ "$n" -ge 10 ] || fail "only $n thumbnails"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  ui | grep -q 'content-desc="wallpaper-screen"' && fail "Back didn't close the Wallpaper screen"
+  true
+}
+
+# Delete from the TV: open the Wallpaper screen on the picture, Down to Delete, confirm.
 t_delete() {
   home; was=$(shown | sed 's/.*wallpaper:\([^"]*\)"/\1/')
   tmp=$(mktemp -d); png 640 360 > "$tmp/tvhome-del.png"
   sh wallpaper.sh "$TV" "$tmp/tvhome-del.png" >/dev/null || fail "wallpaper.sh failed"
   home
-  for _ in 1 2 3; do sh_tv input keyevent KEYCODE_DPAD_DOWN; done
-  for _ in 1 2 3 4 5 6 7; do [ "$(focused)" = Settings ] && break; sh_tv input keyevent KEYCODE_DPAD_RIGHT; done
-  [ "$(focused)" = Settings ] || fail "couldn't reach the Settings tile"
-  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
+  sh_tv am start -n $ME/.MainActivity --es open wallpapers >/dev/null; sleep 3
+  ui | grep -q 'content-desc="thumb:image:tvhome-del.png' || fail "the pushed picture isn't in the grid"
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(focused)" = Delete ] && break; sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 0.5; done
+  [ "$(focused)" = Delete ] || sh_tv input keyevent KEYCODE_DPAD_RIGHT
+  for _ in 1 2 3; do [ "$(focused)" = Delete ] && break; sh_tv input keyevent KEYCODE_DPAD_RIGHT; sleep 0.5; done
+  [ "$(focused)" = Delete ] || fail "couldn't reach Delete (focused: $(focused))"
   sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 2
-  ui | grep -q 'text="tvhome-del.png"' || fail "the pushed picture isn't in the Wallpaper list"
-  sh_tv input keyevent --longpress KEYCODE_DPAD_CENTER; sleep 2
-  ui | grep -q 'text="Delete"' || fail "hold OK on the picture didn't offer Delete"
-  sh_tv input keyevent KEYCODE_DPAD_DOWN; sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 2
   ui | grep -q 'Delete tvhome-del.png?' || fail "Delete didn't ask to confirm"
   sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 2
   sh_tv ls /sdcard/Android/data/$ME/files/wallpapers/ | grep -q tvhome-del.png && fail "the picture is still on the TV"
@@ -333,7 +346,7 @@ if [ "$ONLY" = postboot ]; then echo "== postboot"; t_postboot; echo PASS; exit 
 saved=$(a11y)
 trap 'sh_tv "settings put secure $A11Y '"'"'$saved'"'"'" >/dev/null 2>&1' EXIT
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control rows; do
+for t in baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control rows wallscreen; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"
