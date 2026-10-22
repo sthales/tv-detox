@@ -50,7 +50,7 @@ final class Config {
     static Set<String> splitSet(String s) {
         Set<String> out = new LinkedHashSet<>();
         if (s == null) return out;
-        for (String part : s.split(",")) if (!part.trim().isEmpty()) out.add(part.trim());
+        for (String part : s.split(",")) if (!part.trim().isEmpty() && !part.trim().equals("none")) out.add(part.trim());
         return out;
     }
 

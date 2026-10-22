@@ -41,7 +41,11 @@ final class Showcase extends FrameLayout {
         List<Slide> slides();
         Bitmap load(Slide s, int w, int h); // called off the main thread
         long interval();
+        boolean drift();
+        boolean sharp4k();
     }
+
+    private static final float[] STILL = {1f, 1f, 0f, 0f, 0f, 0f};
 
     private static final ExecutorService decoder = Executors.newSingleThreadExecutor();
     private static final long FADE = 1500;
@@ -54,8 +58,15 @@ final class Showcase extends FrameLayout {
     private final TextView caption, playing;
     private final float scale;
     private List<Slide> slides = new ArrayList<>();
-    private int index = -1, front = 0;
+    private int index = -1, front = 0, gen;
+    private final Runnable advance = () -> go(1);
     private boolean running;
+    private android.view.SurfaceView surface;
+    private Bitmap cur, nxt;
+    private float[] curD = STILL, nxtD = STILL;
+    private boolean curFit, nxtFit;
+    private float curT, nxtT, fade = 1f;
+    private ValueAnimator fader, mover;
 
     Showcase(Context c, Source source, android.graphics.Typeface regular, android.graphics.Typeface semibold) {
         super(c);
@@ -68,6 +79,19 @@ final class Showcase extends FrameLayout {
             views[i].setScaleType(ImageView.ScaleType.MATRIX);
             views[i].setAlpha(0f);
             addView(views[i], new LayoutParams(-1, -1));
+        }
+        if (source.sharp4k()) {
+            surface = new android.view.SurfaceView(c);
+            android.view.Display.Mode mode = ((android.view.WindowManager) c.getSystemService(Context.WINDOW_SERVICE))
+                    .getDefaultDisplay().getMode();
+            surface.getHolder().setFixedSize(mode.getPhysicalWidth(), mode.getPhysicalHeight());
+            surface.getHolder().addCallback(new android.view.SurfaceHolder.Callback() {
+                @Override public void surfaceCreated(android.view.SurfaceHolder h) { render(); }
+                @Override public void surfaceChanged(android.view.SurfaceHolder h, int f, int w, int hh) { render(); }
+                @Override public void surfaceDestroyed(android.view.SurfaceHolder h) {}
+            });
+            addView(surface, new LayoutParams(-1, -1));
+            setBackgroundColor(Color.TRANSPARENT);
         }
         View shade = new View(c);
         shade.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
@@ -106,7 +130,32 @@ final class Showcase extends FrameLayout {
         running = true;
         slides = new ArrayList<>(source.slides());
         Collections.shuffle(slides);
-        next();
+        go(1);
+    }
+
+    boolean key(android.view.KeyEvent e) {
+        int step;
+        switch (e.getKeyCode()) {
+            case android.view.KeyEvent.KEYCODE_DPAD_LEFT:
+            case android.view.KeyEvent.KEYCODE_MEDIA_REWIND:
+                step = -1;
+                break;
+            case android.view.KeyEvent.KEYCODE_DPAD_RIGHT:
+            case android.view.KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
+                step = 1;
+                break;
+            case android.view.KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+            case android.view.KeyEvent.KEYCODE_MEDIA_PLAY:
+            case android.view.KeyEvent.KEYCODE_MEDIA_PAUSE:
+            case android.view.KeyEvent.KEYCODE_MEDIA_NEXT:
+            case android.view.KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                ((android.media.AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE)).dispatchMediaKeyEvent(e);
+                return true;
+            default:
+                return false;
+        }
+        if (e.getAction() == android.view.KeyEvent.ACTION_DOWN) go(step);
+        return true;
     }
 
     void stop() {
@@ -117,6 +166,9 @@ final class Showcase extends FrameLayout {
             views[i].animate().cancel();
             views[i].setImageDrawable(null);
         }
+        if (fader != null) fader.cancel();
+        if (mover != null) mover.cancel();
+        cur = nxt = null;
     }
 
     @Override protected void onDetachedFromWindow() {
@@ -136,25 +188,39 @@ final class Showcase extends FrameLayout {
         playing.setVisibility(VISIBLE);
     }
 
-    private void next() {
+    private void go(int step) {
         if (!running || slides.isEmpty()) return;
-        index = (index + 1) % slides.size();
+        ui.removeCallbacks(advance);
+        final int g = ++gen;
+        index = ((index + step) % slides.size() + slides.size()) % slides.size();
         final Slide s = slides.get(index);
         final int seed = index;
-        final int w = Math.round(getResources().getDisplayMetrics().widthPixels * HEADROOM);
-        final int h = Math.round(getResources().getDisplayMetrics().heightPixels * HEADROOM);
+        int sw = getResources().getDisplayMetrics().widthPixels, sh = getResources().getDisplayMetrics().heightPixels;
+        if (surface != null) {
+            android.view.Display.Mode mode = ((android.view.WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE))
+                    .getDefaultDisplay().getMode();
+            sw = mode.getPhysicalWidth();
+            sh = mode.getPhysicalHeight();
+        }
+        float room = source.drift() ? HEADROOM : 1f;
+        final int w = Math.round(sw * room), h = Math.round(sh * room);
         decoder.execute(() -> {
             final Bitmap b = source.load(s, w, h);
             ui.post(() -> {
-                if (!running) return;
+                if (!running || g != gen) return;
                 if (b != null) show(s, b, seed);
-                ui.postDelayed(this::next, b != null ? Math.max(FADE * 2, source.interval()) : 1000);
+                ui.postDelayed(advance, b != null ? Math.max(FADE * 2, source.interval()) : 1000);
             });
         });
     }
 
     // The new picture fades in over the old one, drifting from the moment it appears.
     private void show(Slide s, Bitmap b, int seed) {
+        caption.setText(s.caption == null ? "" : s.caption);
+        if (surface != null) {
+            show4k(s, b, seed);
+            return;
+        }
         final int back = 1 - front;
         final ImageView v = views[back];
         v.setImageBitmap(b);
@@ -163,7 +229,7 @@ final class Showcase extends FrameLayout {
         // shade, clock and caption (Z = 2) always on top.
         v.setTranslationZ(1f);
         views[front].setTranslationZ(0f);
-        final float[] d = Config.drift(seed);
+        final float[] d = source.drift() ? Config.drift(seed) : STILL;
         final boolean fit = s.fit;
         if (drifts[back] != null) drifts[back].cancel();
         ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
@@ -180,13 +246,67 @@ final class Showcase extends FrameLayout {
             old.setImageDrawable(null);
         }).start();
         front = back;
-        caption.setText(s.caption == null ? "" : s.caption);
     }
 
-    // The picture's matrix at drift time t: cover (or fit) the screen, then zoom and pan by Config.drift.
-    private void place(ImageView v, Bitmap b, float[] d, float t, boolean fit) {
-        float vw = getWidth() > 0 ? getWidth() : getResources().getDisplayMetrics().widthPixels;
-        float vh = getHeight() > 0 ? getHeight() : getResources().getDisplayMetrics().heightPixels;
+    private void show4k(Slide s, Bitmap b, int seed) {
+        nxt = b;
+        nxtD = source.drift() ? Config.drift(seed) : STILL;
+        nxtFit = s.fit;
+        nxtT = 0f;
+        surface.setContentDescription("slide:" + s.key);
+        if (fader != null) fader.cancel();
+        fader = ValueAnimator.ofFloat(0f, 1f);
+        fader.setDuration(cur == null ? 1 : FADE);
+        fader.addUpdateListener(an -> {
+            fade = (float) an.getAnimatedValue();
+            render();
+        });
+        fader.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override public void onAnimationEnd(android.animation.Animator an) {
+                if (nxt == null) return;
+                cur = nxt;
+                curD = nxtD;
+                curFit = nxtFit;
+                curT = nxtT;
+                nxt = null;
+                fade = 1f;
+                render();
+            }
+        });
+        if (mover != null) mover.cancel();
+        if (source.drift()) {
+            mover = ValueAnimator.ofFloat(0f, 1f);
+            mover.setDuration(source.interval() + FADE * 2);
+            mover.setInterpolator(new android.view.animation.LinearInterpolator());
+            mover.addUpdateListener(an -> {
+                float t = (float) an.getAnimatedValue();
+                if (nxt != null) nxtT = t; else curT = t;
+                if (fader == null || !fader.isRunning()) render();
+            });
+            mover.start();
+        }
+        fader.start();
+    }
+
+    private void render() {
+        if (surface == null || !surface.getHolder().getSurface().isValid()) return;
+        android.graphics.Canvas c = null;
+        try {
+            c = surface.getHolder().lockHardwareCanvas();
+            c.drawColor(Color.BLACK);
+            android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG);
+            if (cur != null) c.drawBitmap(cur, matrix(cur, curD, curT, curFit, c.getWidth(), c.getHeight()), p);
+            if (nxt != null) {
+                p.setAlpha(Math.round(fade * 255));
+                c.drawBitmap(nxt, matrix(nxt, nxtD, nxtT, nxtFit, c.getWidth(), c.getHeight()), p);
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (c != null) try { surface.getHolder().unlockCanvasAndPost(c); } catch (Exception ignored) {}
+        }
+    }
+
+    private static Matrix matrix(Bitmap b, float[] d, float t, boolean fit, float vw, float vh) {
         float base = fit ? Math.min(vw / b.getWidth(), vh / b.getHeight()) : Math.max(vw / b.getWidth(), vh / b.getHeight());
         float z = d[0] + (d[1] - d[0]) * t;
         float dx = (d[2] + (d[4] - d[2]) * t) * vw, dy = (d[3] + (d[5] - d[3]) * t) * vh;
@@ -194,7 +314,14 @@ final class Showcase extends FrameLayout {
         Matrix m = new Matrix();
         m.setScale(s, s);
         m.postTranslate((vw - b.getWidth() * s) / 2 + dx, (vh - b.getHeight() * s) / 2 + dy);
-        v.setImageMatrix(m);
+        return m;
+    }
+
+    // The picture's matrix at drift time t: cover (or fit) the screen, then zoom and pan by Config.drift.
+    private void place(ImageView v, Bitmap b, float[] d, float t, boolean fit) {
+        float vw = getWidth() > 0 ? getWidth() : getResources().getDisplayMetrics().widthPixels;
+        float vh = getHeight() > 0 ? getHeight() : getResources().getDisplayMetrics().heightPixels;
+        v.setImageMatrix(matrix(b, d, t, fit, vw, vh));
     }
 
     private int px(int v) { return Math.round(v * scale); }

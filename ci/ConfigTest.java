@@ -44,6 +44,8 @@ public class ConfigTest {
         assert Config.joinSet(Config.splitSet(" x , ,y ")).equals("x,y");
         assert Config.splitSet("").isEmpty();
         assert Config.splitSet(null).isEmpty();
+        assert Config.splitSet("none").isEmpty();
+        assert Config.joinSet(Config.splitSet("none,a")).equals("a");
     }
 
     static void parseKeysRefusesNavigationAndSystemKeys() {

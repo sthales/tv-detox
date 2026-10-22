@@ -42,6 +42,10 @@ if [ ! -f "$APK" ]; then
   curl -fsSL -o "$APK" https://github.com/Ansub/tv-detox/releases/latest/download/tvhome.apk
 fi
 
+if adb -s "$TV" shell pm path com.ansub.tvhome >/dev/null 2>&1; then
+  sh backup.sh "$TV" || echo "Couldn't back up the current settings; installing anyway."
+fi
+
 echo "Installing… If your TV shows a Google Play Protect message, follow it on the TV to allow the install."
 if ! out=$(adb -s "$TV" install -r "$APK" 2>&1); then
   case "$out" in

@@ -2,9 +2,8 @@
 # Checks the fork's additions on a TV that already runs this home. Unlike smoke-test.sh it never
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
-# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control rows wallscreen wallmenu. Name one to run only that.
-# The enabled accessibility services and the wallpaper are put back afterwards. The key map is reset to
-# extras.sh's default and hidden HDMI inputs are shown again (the app's settings can't be read from adb).
+# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream. Name one to run only that.
+# The enabled accessibility services and all the home's settings are put back afterwards (settings export/import).
 #   sh ci/extras-test.sh <TV> postboot   right after a real restart, before any script: checks only
 set -e
 cd "$(dirname "$0")/.."
@@ -152,8 +151,10 @@ t_hdmi() {
   [ "$(tiles)" -eq $((none_shown + 1)) ] || fail "with three hidden, expected one HDMI tile"
   hide "${P}15,${P}16,${P}17,${P}18,bogus/id" 3
   [ "$(tiles)" -eq "$none_shown" ] || fail "an unknown hidden id changed the layout"
+  sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 1
   ui | grep -q 'text="Settings"' || fail "Settings gone with every input hidden"
   ui | grep -q 'text="Apps"' || fail "Apps tile gone with every input hidden"
+  sh_tv input keyevent KEYCODE_DPAD_UP; sleep 1
   hide none 4
   [ "$(tiles)" -eq "$all0" ] || fail "'none' didn't bring the inputs back"
 }
@@ -365,6 +366,80 @@ t_rows() {
   top=$(settings_top); [ "$top" -ge 980 ] || [ "$top" -lt 0 ] || fail "Up didn't tuck the second row away (Settings label at y=$top)"
 }
 
+FILES=/sdcard/Android/data/$ME/files
+SN=0
+settings() { SN=$((SN+1)); sh_tv am start -n $ME/.MainActivity --es settings "$1" --es stamp "s$1$(date +%s)-$SN" >/dev/null; sleep 2; }
+t_settings() {
+  sh_tv rm -f $FILES/settings.json
+  settings export
+  a=$(sh_tv cat $FILES/settings.json | grep -v '"stamp"'); [ -n "$a" ] || fail "export wrote no settings.json"
+  sh_tv cp $FILES/settings.json $FILES/settings-test.json
+  sh_tv am start -n $ME/.MainActivity --es showcase_every 15m --es stamp "s15$(date +%s)" >/dev/null; sleep 1
+  settings export
+  sh_tv cat $FILES/settings.json | grep -q '"showcase_every": "15m"' || fail "export doesn't show a change: $(sh_tv cat $FILES/settings.json | head -20)"
+  sh_tv cp $FILES/settings-test.json $FILES/settings.json
+  settings import
+  settings export
+  b=$(sh_tv cat $FILES/settings.json | grep -v '"stamp"')
+  [ "$a" = "$b" ] || fail "import didn't put the settings back: $(printf '%s\n' "$a" > /tmp/a.$$; printf '%s\n' "$b" | diff /tmp/a.$$ -; rm -f /tmp/a.$$)"
+  sh_tv rm -f $FILES/settings-test.json
+}
+
+picked() { ui | grep -o '<node [^>]*selected="true"[^>]*>' | grep -o 'text="[^"]*"' | head -1 | sed 's/text="\(.*\)"/\1/'; }
+t_saver() {
+  sh_tv am start -n $ME/.MainActivity --es showcase_every 1m --es sources none --es saver_drift off --es saver_4k on \
+    --es stamp "sv$(date +%s)" >/dev/null; sleep 1
+  sh_tv am start -n $ME/.MainActivity --es open saver >/dev/null; sleep 2
+  x=$(ui)
+  for t in 'Start now' 'Change picture: every 1 min' 'Places: Off' 'Earth: Off' 'Space: Off' 'Drift: Off' '4K: On' 'Use as TV screensaver'; do
+    echo "$x" | grep -q "text=\"$t" || fail "the Screensaver panel has no '$t'"
+  done
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(picked)" = "Drift: Off" ] && break; sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 0.5; done
+  [ "$(picked)" = "Drift: Off" ] || fail "couldn't reach Drift (on: $(picked))"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
+  [ "$(picked)" = "Drift: On" ] || fail "OK on Drift didn't switch it on and stay on the row (on: $(picked))"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  sh_tv am start -n $ME/.MainActivity --es saver_drift off --es sources all --es showcase_every 5m --es stamp "sw$(date +%s)" >/dev/null
+}
+
+t_star() {
+  sh_tv am start -n $ME/.MainActivity --es showcase none --es stamp "st$(date +%s)" >/dev/null; sleep 1
+  sh_tv am start -n $ME/.MainActivity --es open wallpapers >/dev/null; sleep 3
+  t=$(focused_thumb); [ -n "$t" ] || fail "no thumbnail focused"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
+  for _ in 1 2 3 4; do [ "$(focused)" = "Add to screensaver" ] && break; sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 0.5; done
+  [ "$(focused)" = "Add to screensaver" ] || fail "no Add to screensaver in the menu of $t"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
+  badge_of "$t" | grep -q '★' || fail "$t didn't get the ★ (badge: '$(badge_of "$t")')"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+}
+
+slide() { ui | grep -o 'content-desc="slide:[^"]*"' | head -1; }
+t_slidenav() {
+  sh_tv am start -n $ME/.MainActivity --es sources all --es stamp "sn$(date +%s)" >/dev/null
+  home
+  sh_tv input keyevent KEYCODE_BACK; sleep 3
+  a=$(slide); [ -n "$a" ] || fail "no slide showing"
+  sh_tv input keyevent KEYCODE_DPAD_RIGHT; sleep 3
+  b=$(slide); ambient_on || fail "Right left the slideshow"
+  [ -n "$b" ] && [ "$a" != "$b" ] || fail "Right didn't move to another picture ($a -> $b)"
+  sh_tv input keyevent KEYCODE_DPAD_LEFT; sleep 3
+  [ "$(slide)" = "$a" ] || fail "Left didn't go back ($a, now $(slide))"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
+  apps_on || fail "OK didn't leave the slideshow"
+}
+
+saver_now() { sh_tv settings get secure screensaver_components; }
+t_dream() {
+  sh_tv am start -n $ME/.MainActivity --es tv_saver on --es stamp "d1$(date +%s)" >/dev/null; sleep 2
+  [ "$(saver_now)" = "$ME/.Dream" ] || fail "screensaver is $(saver_now), not ours"
+  sh_tv am start -n $ME/.MainActivity --es tv_saver off --es stamp "d0$(date +%s)" >/dev/null; sleep 2
+  case "$(saver_now)" in *"$ME"*|""|null) fail "turning it off didn't give the old screensaver back ($(saver_now))" ;; esac
+  sh_tv am start -n $ME/.MainActivity --es tv_saver on --es stamp "d2$(date +%s)" >/dev/null; sleep 2
+  [ "$(saver_now)" = "$ME/.Dream" ] || fail "screensaver didn't come back to ours ($(saver_now))"
+  sh_tv dumpsys package $ME | grep -q 'android.service.dreams.DreamService' || fail "Dream service isn't declared"
+}
+
 # Right after a real restart: the remap service and the bell must be back on their own.
 t_postboot() {
   a11y | grep -q "com.ansub.tvhome/" || fail "KeyService not enabled after the restart: $(a11y)"
@@ -373,11 +448,18 @@ t_postboot() {
   bell | grep -q 'Notifications' || fail "bell missing after the restart"
 }
 if [ "$ONLY" = postboot ]; then echo "== postboot"; t_postboot; echo PASS; exit 0; fi
+if [ "$ONLY" = info ]; then echo "== info (known broken: TCL info panel from the home)"; t_info; echo PASS; exit 0; fi
 
 saved=$(a11y)
-trap 'sh_tv "settings put secure $A11Y '"'"'$saved'"'"'" >/dev/null 2>&1' EXIT
+settings export
+sh_tv cp $FILES/settings.json $FILES/settings-before-test.json
+restore_all() {
+  sh_tv "settings put secure $A11Y '$saved'" >/dev/null 2>&1
+  sh_tv cp $FILES/settings-before-test.json $FILES/settings.json && settings import
+}
+trap restore_all EXIT
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control rows wallscreen wallmenu; do
+for t in baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"

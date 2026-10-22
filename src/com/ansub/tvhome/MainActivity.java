@@ -255,13 +255,37 @@ public class MainActivity extends Activity {
         String rotation = intent == null ? null : intent.getStringExtra("rotation");
         // banner.sh only needs the tiles redrawn; the picture itself is the file.
         String banner = intent == null ? null : intent.getStringExtra("banner");
+        String settings = intent == null ? null : intent.getStringExtra("settings");
+        String every = intent == null ? null : intent.getStringExtra("showcase_every");
+        String showcase = intent == null ? null : intent.getStringExtra("showcase");
+        String sources = intent == null ? null : intent.getStringExtra("sources");
+        String drift = intent == null ? null : intent.getStringExtra("saver_drift");
+        String sharp = intent == null ? null : intent.getStringExtra("saver_4k");
+        String tvSaver = intent == null ? null : intent.getStringExtra("tv_saver");
         if (apps == null && quick == null && keys == null && wall == null && hidden == null && banner == null
-                && rotate == null && rotation == null && name == null && avatar == null) return false;
+                && rotate == null && rotation == null && name == null && avatar == null && settings == null
+                && every == null && showcase == null && sources == null && drift == null && sharp == null
+                && tvSaver == null) return false;
         SharedPreferences prefs = getSharedPreferences(PREFS, 0);
         String stamp = intent.getStringExtra("stamp");
         if (stamp != null && stamp.equals(prefs.getString("stamp", null))) return false;
+        if ("export".equals(settings)) {
+            try { Backup.export(this); } catch (Exception ignored) {}
+        } else if ("import".equals(settings)) {
+            try { Backup.load(this); } catch (Exception ignored) {}
+            recreate();
+        }
         SharedPreferences.Editor e = prefs.edit();
         if (stamp != null) e.putString("stamp", stamp);
+        if (every != null) e.putString("showcase_every", every.trim());
+        if (showcase != null) e.putString("showcase", Config.joinSet(Config.splitSet(showcase)));
+        if (sources != null) {
+            java.util.Set<String> on = Config.splitSet(sources);
+            for (String src : OnlinePictures.SOURCES) e.putBoolean("src_" + src, on.contains("all") || on.contains(src));
+        }
+        if (drift != null) e.putBoolean("saver_drift", drift.trim().equals("on"));
+        if (sharp != null) e.putBoolean("saver_4k", sharp.trim().equals("on"));
+        if (tvSaver != null) e.putBoolean("tv_saver", tvSaver.trim().equals("on"));
         if (apps != null) {
             apps = apps.trim();
             if (apps.isEmpty() || apps.equalsIgnoreCase("auto")) e.remove("apps");
@@ -282,6 +306,7 @@ public class MainActivity extends Activity {
             else e.putString("hidden_inputs", Config.joinSet(Config.splitSet(hidden)));
         }
         e.commit(); // not apply(): a script may restart the TV or the app right after sending this
+        if (tvSaver != null) applySaver(this);
         dirty = true;
         return true;
     }
@@ -316,6 +341,7 @@ public class MainActivity extends Activity {
             buildTiles();
         }
         healServices();
+        applySaver(this);
         rotateIfDue();
         OnlinePictures.refresh(this);
         View f = getCurrentFocus();
@@ -382,6 +408,7 @@ public class MainActivity extends Activity {
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (!ambient) return super.dispatchKeyEvent(event);
+        if (showcase != null && showcase.key(event)) return true;
         if (event.getAction() == KeyEvent.ACTION_UP) showAmbient(false);
         return true;
     }
@@ -442,7 +469,73 @@ public class MainActivity extends Activity {
                 long ms = Config.intervalMillis(c.getSharedPreferences(PREFS, 0).getString("showcase_every", "5m"));
                 return ms > 0 ? ms : 5 * 60 * 1000L;
             }
+            @Override public boolean drift() { return c.getSharedPreferences(PREFS, 0).getBoolean("saver_drift", false); }
+            @Override public boolean sharp4k() { return c.getSharedPreferences(PREFS, 0).getBoolean("saver_4k", true); }
         };
+    }
+
+    private static final String[] SAVER_EVERY = {"1m", "5m", "15m", "30m"};
+    private static final String[] SAVER_EVERY_LABELS = {"1 min", "5 min", "15 min", "30 min"};
+    private static final String[] SOURCE_LABELS = {"Places", "Earth", "Space"};
+
+    private void showSaverSettings(final int row) {
+        final SharedPreferences p = getSharedPreferences(PREFS, 0);
+        String on = Strings.t("On"), off = Strings.t("Off");
+        int every = Math.max(0, Arrays.asList(SAVER_EVERY).indexOf(p.getString("showcase_every", "5m")));
+        final List<String> rows = new ArrayList<>();
+        rows.add(Strings.t("Start now"));
+        rows.add(Strings.t("Change picture") + ": " + String.format(Strings.t("every %s"), Strings.t(SAVER_EVERY_LABELS[every])));
+        rows.add(Strings.t("Your pictures") + " \u2605: " + Config.splitSet(p.getString("showcase", null)).size());
+        for (int i = 0; i < OnlinePictures.SOURCES.length; i++)
+            rows.add(Strings.t(SOURCE_LABELS[i]) + ": " + (OnlinePictures.enabled(this, OnlinePictures.SOURCES[i]) ? on : off));
+        rows.add(Strings.t("Drift") + ": " + (p.getBoolean("saver_drift", false) ? on : off));
+        rows.add("4K: " + (p.getBoolean("saver_4k", true) ? on : off));
+        rows.add(Strings.t("Use as TV screensaver") + ": " + (p.getBoolean("tv_saver", true) ? on : off));
+        final int next = (every + 1) % SAVER_EVERY.length;
+        panel(Strings.t("Screensaver"), rows, null, 0, row, which -> {}, which -> {
+            SharedPreferences.Editor e = p.edit();
+            if (which == 0) {
+                showAmbient(true);
+                return;
+            } else if (which == 1) {
+                e.putString("showcase_every", SAVER_EVERY[next]);
+            } else if (which == 2) {
+                showWallpaperScreen(null);
+                return;
+            } else if (which < 3 + OnlinePictures.SOURCES.length) {
+                String src = OnlinePictures.SOURCES[which - 3];
+                e.putBoolean("src_" + src, !OnlinePictures.enabled(this, src));
+            } else if (which == 6) {
+                e.putBoolean("saver_drift", !p.getBoolean("saver_drift", false));
+            } else if (which == 7) {
+                e.putBoolean("saver_4k", !p.getBoolean("saver_4k", true));
+            } else {
+                e.putBoolean("tv_saver", !p.getBoolean("tv_saver", true));
+            }
+            e.commit();
+            applySaver(this);
+            OnlinePictures.refresh(this);
+            showSaverSettings(which);
+        }, null);
+    }
+
+    private static final String GOOGLE_SAVER = "com.google.android.apps.tv.dreamx/.service.Backdrop";
+
+    static void applySaver(Context c) {
+        SharedPreferences p = c.getSharedPreferences(PREFS, 0);
+        String ours = new android.content.ComponentName(c, Dream.class).flattenToShortString();
+        android.content.ContentResolver r = c.getContentResolver();
+        try {
+            String now = Settings.Secure.getString(r, "screensaver_components");
+            if (p.getBoolean("tv_saver", true)) {
+                if (ours.equals(now)) return;
+                if (now != null && !now.isEmpty()) p.edit().putString("tv_saver_prev", now).commit();
+                Settings.Secure.putString(r, "screensaver_components", ours);
+            } else if (ours.equals(now)) {
+                Settings.Secure.putString(r, "screensaver_components", p.getString("tv_saver_prev", GOOGLE_SAVER));
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     // Gradients first, then the pictures in the wallpapers folder by name.
@@ -611,6 +704,10 @@ public class MainActivity extends Activity {
         return Config.splitSet(getSharedPreferences(PREFS, 0).getString("rotation", null));
     }
 
+    private java.util.Set<String> showcaseSet() {
+        return Config.splitSet(getSharedPreferences(PREFS, 0).getString("showcase", null));
+    }
+
     private void showWallpaperScreen(String focus) {
         if (wallScreen != null) wallScreen.dismiss();
         final Dialog d = new Dialog(this, android.R.style.Theme_Material_NoActionBar_Fullscreen);
@@ -680,10 +777,11 @@ public class MainActivity extends Activity {
         View focusView = null;
 
         final Runnable refresh = () -> {
-            java.util.Set<String> rot = rotationSet();
+            java.util.Set<String> rot = rotationSet(), star = showcaseSet();
             String current = wallpaper();
             for (int i = 0; i < names.size(); i++) {
-                String n = names.get(i), mark = (n.equals(current) ? "\u2713 " : "") + (rot.contains(n) ? "\u21BB" : "");
+                String n = names.get(i), mark = (n.equals(current) ? "\u2713 " : "") + (rot.contains(n) ? "\u21BB " : "")
+                        + (star.contains(n) ? "\u2605" : "");
                 badges.get(i).setText(mark.trim());
                 badges.get(i).setVisibility(mark.trim().isEmpty() ? View.GONE : View.VISIBLE);
             }
@@ -737,8 +835,10 @@ public class MainActivity extends Activity {
     private void wallpaperMenu(final String name, View anchor, final Runnable refresh) {
         final boolean picture = name.startsWith(IMAGE);
         final boolean in = rotationSet().contains(name);
-        String[] items = picture ? new String[] {"Set as wallpaper", in ? "Remove from rotation" : "Add to rotation", "Delete"}
-                : new String[] {"Set as wallpaper", in ? "Remove from rotation" : "Add to rotation"};
+        final boolean star = showcaseSet().contains(name);
+        String rotItem = in ? "Remove from rotation" : "Add to rotation", saverItem = star ? "Remove from screensaver" : "Add to screensaver";
+        String[] items = picture ? new String[] {"Set as wallpaper", rotItem, saverItem, "Delete"}
+                : new String[] {"Set as wallpaper", rotItem, saverItem};
         dropdown(anchor, items, which -> {
             if (which == 0) {
                 setWallpaperTo(name);
@@ -748,6 +848,11 @@ public class MainActivity extends Activity {
                 if (!rot.remove(name)) rot.add(name);
                 getSharedPreferences(PREFS, 0).edit().putString("rotation", Config.joinSet(rot)).apply();
                 rotateIfDue();
+                refresh.run();
+            } else if (which == 2) {
+                java.util.Set<String> chosen = showcaseSet();
+                if (!chosen.remove(name)) chosen.add(name);
+                getSharedPreferences(PREFS, 0).edit().putString("showcase", Config.joinSet(chosen)).apply();
                 refresh.run();
             } else {
                 final String label = name.substring(IMAGE.length());
@@ -1254,6 +1359,7 @@ public class MainActivity extends Activity {
         intent.removeExtra("open");
         if (open.equals("control")) ui.post(() -> { if (controlCenter == null) showControlCenter(); });
         else if (open.equals("wallpapers")) ui.post(() -> showWallpaperScreen(null));
+        else if (open.equals("saver")) ui.post(() -> showSaverSettings(0));
     }
 
     // The chip at the top right: time and avatar on glass.
@@ -1393,7 +1499,7 @@ public class MainActivity extends Activity {
                 Strings.t("Bluetooth"), Strings.t("Sound"), Strings.t("Picture"), Strings.t("Inputs"),
                 Strings.t("Screensaver"), Strings.t("Alerts"), Strings.t("Wallpaper"), Strings.t("Settings"), Strings.t("Apps")};
         Runnable[] actions = {this::openNetworkSettings, () -> openQuick("bluetooth"), () -> openQuick("sound"),
-                () -> openQuick("picture"), this::openInputs, () -> showAmbient(true), this::showNotifications,
+                () -> openQuick("picture"), this::openInputs, () -> showSaverSettings(0), this::showNotifications,
                 () -> showWallpaperScreen(null), this::openTvSettings, this::showAllApps};
         LinearLayout row = null;
         View first = null;
