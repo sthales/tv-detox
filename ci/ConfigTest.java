@@ -12,6 +12,7 @@ public class ConfigTest {
         parseKeysRefusesNavigationAndSystemKeys();
         controllersAreNotRemapped();
         bannerFileMatchesThePackageOnly();
+        inputIdsBecomeFileNames();
         rotationIntervalsParse();
         rotationCyclesThroughTheChosenOnly();
         rotationIsDueAfterTheInterval();
@@ -59,6 +60,13 @@ public class ConfigTest {
         assert Config.fromController(0x401);       // SOURCE_GAMEPAD
         assert Config.fromController(0x1000010);   // SOURCE_JOYSTICK
         assert Config.fromController(0x501);       // keyboard | gamepad, how many pads report
+    }
+
+    static void inputIdsBecomeFileNames() {
+        assert "com.tcl.tvinput_.TvPassThroughService_HW15".equals(Config.fileKey("com.tcl.tvinput/.TvPassThroughService/HW15"));
+        assert "com.netflix.ninja".equals(Config.fileKey("com.netflix.ninja"));
+        String[] files = {"com.tcl.tvinput_.TvPassThroughService_HW15.png"};
+        assert files[0].equals(Config.bannerFile(Config.fileKey("com.tcl.tvinput/.TvPassThroughService/HW15"), files));
     }
 
     static void bannerFileMatchesThePackageOnly() {

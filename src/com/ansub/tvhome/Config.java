@@ -61,6 +61,10 @@ final class Config {
     }
 
     // The custom banner for pkg among the files in the banners folder: "<pkg>.<picture extension>".
+    static String fileKey(String id) {
+        return id.replaceAll("[^A-Za-z0-9._]", "_");
+    }
+
     static String bannerFile(String pkg, String[] files) {
         if (files == null) return null;
         for (String f : files) {

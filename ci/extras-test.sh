@@ -2,7 +2,7 @@
 # Checks the fork's additions on a TV that already runs this home. Unlike smoke-test.sh it never
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
-# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream. Name one to run only that.
+# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream nowplaying. Name one to run only that.
 # The enabled accessibility services and all the home's settings are put back afterwards (settings export/import).
 #   sh ci/extras-test.sh <TV> postboot   right after a real restart, before any script: checks only
 set -e
@@ -11,6 +11,7 @@ TV="$1"; ONLY="$2"
 [ -n "$TV" ] || { echo "Usage: sh ci/extras-test.sh <TV> [section]" >&2; exit 1; }
 case "$TV" in *.*.*.*:*|*.*.*.*) adb connect "$TV" >/dev/null 2>&1 || true ;; esac
 ME=com.ansub.tvhome
+FILES=/sdcard/Android/data/$ME/files
 
 sh_tv() { adb -s "$TV" shell "$@" </dev/null | tr -d '\r'; }
 focus() { sh_tv dumpsys window | grep -m1 mCurrentFocus; }
@@ -211,6 +212,8 @@ print(sum(1 for i in range(0,len(px),16) if px[i]<40 and px[i+1]>215 and px[i+2]
 
 t_banner() {
   tmp=$(mktemp -d)
+  B=$FILES/banners/com.google.android.youtube.tv
+  for e in png jpg jpeg webp; do sh_tv ls $B.$e >/dev/null 2>&1 && adb -s "$TV" pull $B.$e "$tmp/mine.$e" >/dev/null 2>&1; done
   python3 -c 'import sys,zlib,struct
 w,h=640,360
 c=lambda t,d:struct.pack(">I",len(d))+t+d+struct.pack(">I",zlib.crc32(t+d))
@@ -224,6 +227,7 @@ sys.stdout.buffer.write(b"\x89PNG\r\n\x1a\n"+c(b"IHDR",struct.pack(">IIBBBBB",w,
   [ "$(green)" -lt 2000 ] || fail "--reset didn't bring back YouTube's own banner"
   sh banner.sh "$TV" "$tmp/b.png" com.not.installed >/dev/null 2>&1 && fail "banner.sh accepted an app that isn't installed"
   sh banner.sh "$TV" "$tmp/b.png" 'x;rm' >/dev/null 2>&1 && fail "banner.sh accepted a bad package name"
+  for f in "$tmp"/mine.*; do [ -f "$f" ] && sh banner.sh "$TV" "$f" com.google.android.youtube.tv >/dev/null; done
   rm -rf "$tmp"
 }
 
@@ -366,7 +370,6 @@ t_rows() {
   top=$(settings_top); [ "$top" -ge 980 ] || [ "$top" -lt 0 ] || fail "Up didn't tuck the second row away (Settings label at y=$top)"
 }
 
-FILES=/sdcard/Android/data/$ME/files
 SN=0
 settings() { SN=$((SN+1)); sh_tv am start -n $ME/.MainActivity --es settings "$1" --es stamp "s$1$(date +%s)-$SN" >/dev/null; sleep 2; }
 t_settings() {
@@ -429,6 +432,35 @@ t_slidenav() {
   apps_on || fail "OK didn't leave the slideshow"
 }
 
+yt_state() { sh_tv dumpsys media_session | awk '/package=com.google.android.youtube.tv/{f=1} f&&/state=PlaybackState/{print; exit}' | grep -o '{state=[A-Z_]*' | cut -c2-; }
+t_nowplaying() {
+  sh_tv cmd media_session dispatch pause >/dev/null 2>&1; home; sleep 1
+  sh_tv am force-stop com.google.android.youtube.tv
+  home; sleep 1
+  ui | grep -q 'content-desc="nowplaying"' && fail "the chip shows something playing with nothing playing"
+  sh_tv am start -a android.intent.action.VIEW -d "https://www.youtube.com/watch?v=aqz-KE-bpKQ" com.google.android.youtube.tv >/dev/null
+  for _ in $(seq 1 30); do [ "$(yt_state)" = "state=PLAYING" ] && break; sleep 1; done
+  [ "$(yt_state)" = "state=PLAYING" ] || fail "couldn't get YouTube playing for the test ($(yt_state))"
+  home; sleep 2
+  x=$(ui)
+  echo "$x" | grep -q 'content-desc="nowplaying"' || fail "the chip doesn't show what's playing"
+  echo "$x" | grep -q 'Big Buck Bunny' || fail "the chip doesn't show the title"
+  sh_tv input keyevent 83; sleep 3
+  x=$(ui)
+  echo "$x" | grep -q 'content-desc="nowplaying-card"' || fail "Control Center has no now-playing card"
+  echo "$x" | grep -q 'content-desc="playpause"' || fail "the card has no play/pause"
+  [ "$(focused_desc)" = playpause ] || fail "Control Center doesn't open on play/pause when something's playing (on: $(focused_desc))"
+  before=$(yt_state)
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 2
+  [ "$(yt_state)" != "$before" ] || fail "play/pause didn't change the state ($before)"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  sh_tv am force-stop com.google.android.youtube.tv
+  home; sleep 2
+  ui | grep -q 'content-desc="nowplaying"' && fail "the chip still shows a stopped app"
+  true
+}
+focused_desc() { ui | grep -o '<node [^>]*focused="true"[^>]*>' | grep -o 'content-desc="[^"]*"' | head -1 | sed 's/content-desc="\(.*\)"/\1/'; }
+
 saver_now() { sh_tv settings get secure screensaver_components; }
 t_dream() {
   sh_tv am start -n $ME/.MainActivity --es tv_saver on --es stamp "d1$(date +%s)" >/dev/null; sleep 2
@@ -459,7 +491,7 @@ restore_all() {
 }
 trap restore_all EXIT
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream; do
+for t in baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream nowplaying; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"

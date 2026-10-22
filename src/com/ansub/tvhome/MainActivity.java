@@ -1115,8 +1115,17 @@ public class MainActivity extends Activity {
         if (inputs.size() > room) inputs = inputs.subList(0, room);
         if (store)
             addTile(root, PLAY_STORE, "Play Store", null, LineIcon.PLAY, null, m + col++ * (w + g), bottomTop, w, h);
-        for (TvInputInfo in : inputs)
-            addTile(root, in.getId(), inputLabel(in), null, LineIcon.HDMI, null, m + col++ * (w + g), bottomTop, w, h);
+        for (TvInputInfo in : inputs) {
+            Drawable banner = null;
+            String custom = Config.bannerFile(Config.fileKey(in.getId()), banners);
+            Bitmap b = custom == null ? null : sharp(new File(banners(), custom), w, h);
+            if (b != null) {
+                banner = new BitmapDrawable(getResources(), b);
+                glassBanners.add(in.getId());
+            }
+            addTile(root, in.getId(), inputLabel(in), banner, banner == null ? LineIcon.HDMI : null, null,
+                    m + col++ * (w + g), bottomTop, w, h);
+        }
         addTile(root, SETTINGS, Strings.t("Settings"), null, LineIcon.SETTINGS, null, m + col++ * (w + g), bottomTop, w, h);
         addTile(root, ADD, Strings.t("Apps"), null, LineIcon.APPS, null, m + col * (w + g), bottomTop, w, h);
 
