@@ -1,11 +1,14 @@
 package com.ansub.tvhome;
 
+import java.util.Arrays;
+import java.util.LinkedHashSet;
 import java.util.Map;
 
 public class ConfigTest {
     public static void main(String[] args) {
         parseKeysReadsCodeToPackage();
         isImageAcceptsPictureFilesOnly();
+        setsRoundTripWithoutDuplicates();
         System.out.println("OK");
     }
 
@@ -25,5 +28,13 @@ public class ConfigTest {
         assert !Config.isImage("c.gif");
         assert !Config.isImage(".jpg.txt");
         assert !Config.isImage(null);
+    }
+
+    static void setsRoundTripWithoutDuplicates() {
+        assert Config.splitSet("a,b,a").equals(new LinkedHashSet<>(Arrays.asList("a", "b")));
+        assert Config.joinSet(Config.splitSet("x,y")).equals("x,y");
+        assert Config.joinSet(Config.splitSet(" x , ,y ")).equals("x,y");
+        assert Config.splitSet("").isEmpty();
+        assert Config.splitSet(null).isEmpty();
     }
 }

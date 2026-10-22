@@ -263,7 +263,8 @@ public class MainActivity extends Activity {
         String quick = intent == null ? null : intent.getStringExtra("quick");
         String keys = intent == null ? null : intent.getStringExtra("keys");
         String wall = intent == null ? null : intent.getStringExtra("wallpaper");
-        if (apps == null && quick == null && keys == null && wall == null) return false;
+        String hidden = intent == null ? null : intent.getStringExtra("hidden_inputs");
+        if (apps == null && quick == null && keys == null && wall == null && hidden == null) return false;
         SharedPreferences prefs = getSharedPreferences(PREFS, 0);
         String stamp = intent.getStringExtra("stamp");
         if (stamp != null && stamp.equals(prefs.getString("stamp", null))) return false;
@@ -281,6 +282,10 @@ public class MainActivity extends Activity {
         }
         if (keys != null) e.putString("keys", keys.trim());
         if (wall != null) e.putString("wallpaper", wall.trim());
+        if (hidden != null) {
+            if (hidden.trim().equalsIgnoreCase("none")) e.remove("hidden_inputs");
+            else e.putString("hidden_inputs", Config.joinSet(Config.splitSet(hidden)));
+        }
         e.apply();
         dirty = true;
         return true;
@@ -643,16 +648,19 @@ public class MainActivity extends Activity {
                     .setDuration(140).withLayer().start();
             if (caption != null) caption.setVisibility(has ? View.VISIBLE : View.INVISIBLE);
         });
-        final boolean editable = rowApps.contains(key);
+        // Apps on the home and HDMI inputs have a menu: hold OK or press Menu.
+        final Runnable menu = rowApps.contains(key) ? () -> showEditMenu(key)
+                : isInput(key) ? () -> showInputMenu(key) : null;
+        final boolean editable = menu != null;
         card.setOnClickListener(v -> open(key));
-        if (editable) card.setOnLongClickListener(v -> { showEditMenu(key); return true; });
+        if (editable) card.setOnLongClickListener(v -> { menu.run(); return true; });
         card.setOnKeyListener((v, code, ev) -> {
             boolean ok = code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER
                     || code == KeyEvent.KEYCODE_NUMPAD_ENTER;
             boolean down = ev.getAction() == KeyEvent.ACTION_DOWN;
             if (key.equals(movingKey)) return moveKey(key, code, ok, down);
             if (editable && code == KeyEvent.KEYCODE_MENU) {
-                if (!down) showEditMenu(key);
+                if (!down) menu.run();
                 return true;
             }
             if (!ok) return false;
@@ -663,7 +671,7 @@ public class MainActivity extends Activity {
                 } else if (editable && !longPressed && (ev.isLongPress()
                         || ev.getEventTime() - ev.getDownTime() >= ViewConfiguration.getLongPressTimeout())) {
                     longPressed = true;
-                    showEditMenu(key);
+                    menu.run();
                 }
             } else {
                 // Only the key-up of an OK that went down on this tile opens the app, and not a cancelled
@@ -721,10 +729,16 @@ public class MainActivity extends Activity {
             showAddMenu(-1);
             return;
         } else if (SETTINGS.equals(key)) {
-            dropdown(tile(SETTINGS), SETTINGS_ITEMS, which -> {
+            String[] items = SETTINGS_ITEMS;
+            if (!hiddenInputs().isEmpty()) {
+                items = Arrays.copyOf(SETTINGS_ITEMS, SETTINGS_ITEMS.length + 1);
+                items[SETTINGS_ITEMS.length] = "Show hidden inputs";
+            }
+            dropdown(tile(SETTINGS), items, which -> {
                 if (which == 0) showWallpapers();
                 else if (which == 1) openBrightness();
-                else openTvSettings();
+                else if (which == 2) openTvSettings();
+                else saveHiddenInputs(new java.util.LinkedHashSet<String>());
             });
             return;
         } else if (isInput(key)) {
@@ -1241,12 +1255,34 @@ public class MainActivity extends Activity {
     }
 
     // The TV's own HDMI inputs (not devices behind them), in order, skipping hidden ones.
+    private java.util.Set<String> hiddenInputs() {
+        return Config.splitSet(getSharedPreferences(PREFS, 0).getString("hidden_inputs", null));
+    }
+
+    private void saveHiddenInputs(java.util.Set<String> ids) {
+        getSharedPreferences(PREFS, 0).edit().putString("hidden_inputs", Config.joinSet(ids)).apply();
+        buildTiles();
+    }
+
+    // Hold OK on an HDMI tile: hide it, for ports with nothing plugged in. Settings > Show hidden inputs
+    // brings them all back.
+    private void showInputMenu(final String id) {
+        dropdown(tile(id), new String[] {"Hide"}, which -> {
+            java.util.Set<String> ids = hiddenInputs();
+            ids.add(id);
+            focusedKey = SETTINGS;
+            saveHiddenInputs(ids);
+        });
+    }
+
     private List<TvInputInfo> hdmiInputs() {
+        java.util.Set<String> hidden = hiddenInputs();
         List<TvInputInfo> out = new ArrayList<>();
         TvInputManager tim = (TvInputManager) getSystemService(Context.TV_INPUT_SERVICE);
         if (tim == null) return out;
         for (TvInputInfo in : tim.getTvInputList()) {
-            if (in.getType() == TvInputInfo.TYPE_HDMI && in.getParentId() == null && !in.isHidden(this)) out.add(in);
+            if (in.getType() == TvInputInfo.TYPE_HDMI && in.getParentId() == null && !in.isHidden(this)
+                    && !hidden.contains(in.getId())) out.add(in);
         }
         Collections.sort(out, (a, b) -> a.getId().compareTo(b.getId()));
         return out.size() > MAX_INPUTS ? out.subList(0, MAX_INPUTS) : out;

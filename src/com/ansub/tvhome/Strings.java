@@ -12,7 +12,7 @@ final class Strings {
         "Settings", "Add app", "Network", "Offline", "Sound", "Picture",
         "Move", "Replace", "Remove from home", "Uninstall", "App info",
         "Use the arrows to move it, then press OK", "Every app is already here", "Add an app", "Replace %s", "Wallpaper", "TV settings", "Brightness",
-        "Notifications", "No notifications", "Clear all",
+        "Notifications", "No notifications", "Clear all", "Hide", "Show hidden inputs",
     };
 
     // Keyed by language ("de"), or language-country ("zh-TW") where a country writes it differently.

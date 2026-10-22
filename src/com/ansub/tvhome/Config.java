@@ -1,7 +1,9 @@
 package com.ansub.tvhome;
 
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Set;
 
 // Parsing for the settings passed with am start. No Android classes, so ci/unit-test.sh can run it with plain java.
 final class Config {
@@ -27,5 +29,19 @@ final class Config {
         if (name == null) return false;
         String n = name.toLowerCase(java.util.Locale.ROOT);
         return n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".png") || n.endsWith(".webp");
+    }
+
+    // "a,b,a" -> [a, b], in order. Used for the HDMI inputs hidden from the home.
+    static Set<String> splitSet(String s) {
+        Set<String> out = new LinkedHashSet<>();
+        if (s == null) return out;
+        for (String part : s.split(",")) if (!part.trim().isEmpty()) out.add(part.trim());
+        return out;
+    }
+
+    static String joinSet(Set<String> s) {
+        StringBuilder b = new StringBuilder();
+        for (String part : s) b.append(b.length() == 0 ? "" : ",").append(part);
+        return b.toString();
     }
 }

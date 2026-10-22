@@ -116,6 +116,25 @@ t_bell() {
   bell | grep -q 'Notifications' || fail "bell didn't come back with access"
 }
 
+tiles() { ui | grep -o 'focusable="true"' | wc -l | tr -d ' '; }
+hide() { sh_tv am start -n $ME/.MainActivity --es hidden_inputs "\"$1\"" --es stamp "h$(date +%s)$2" >/dev/null; sleep 2; home; }
+
+# Labels can be renamed (HDMI 1 -> PS5), so this counts tiles instead of reading names.
+t_hdmi() {
+  P=com.tcl.tvinput/.TvPassThroughService/HW
+  hide none 0; all0=$(tiles)
+  hide "${P}15,${P}16,${P}17,${P}18" 1; none_shown=$(tiles)
+  [ "$none_shown" -lt "$all0" ] || fail "hiding every HDMI input removed no tiles ($all0 -> $none_shown)"
+  hide "${P}16,${P}17,${P}18" 2
+  [ "$(tiles)" -eq $((none_shown + 1)) ] || fail "with three hidden, expected one HDMI tile"
+  hide "${P}15,${P}16,${P}17,${P}18,bogus/id" 3
+  [ "$(tiles)" -eq "$none_shown" ] || fail "an unknown hidden id changed the layout"
+  ui | grep -q 'text="Settings"' || fail "Settings gone with every input hidden"
+  ui | grep -q 'text="Add app"' || fail "Add app gone with every input hidden"
+  hide none 4
+  [ "$(tiles)" -eq "$all0" ] || fail "'none' didn't bring the inputs back"
+}
+
 sh_tv logcat -b crash -c
 for t in baseline keys wallpaper ambient bell hdmi; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
