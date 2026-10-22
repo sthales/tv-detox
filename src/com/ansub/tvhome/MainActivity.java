@@ -145,6 +145,8 @@ public class MainActivity extends Activity {
     private FrameLayout root; // the page, inside a vertical scroller
     private int tileW, tileH, gridTop; // app grid geometry, set by buildTiles
     private final List<View> tiles = new ArrayList<>();
+    // Apps with a custom banner: drawn on glass, so a logo with a transparent background floats on it.
+    private final java.util.Set<String> glassBanners = new java.util.HashSet<>();
     private boolean dirty = true;
     private java.util.Locale shownLocale; // the TV's language (and region) when the page was built
     private String focusedKey;
@@ -502,6 +504,39 @@ public class MainActivity extends Activity {
         }
     }
 
+    // Like crop, for small pictures that must stay crisp (tile logos): decoded at no less than twice
+    // the size, then halved in smooth steps instead of skipping pixels, which leaves logos jagged.
+    private static Bitmap sharp(File f, int w, int h) {
+        try {
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(f.getPath(), o);
+            if (o.outWidth <= 0 || o.outHeight <= 0) return null;
+            o.inSampleSize = 1;
+            while (o.outWidth / (o.inSampleSize * 2) >= 4 * w && o.outHeight / (o.inSampleSize * 2) >= 4 * h) o.inSampleSize *= 2;
+            o.inJustDecodeBounds = false;
+            Bitmap src = BitmapFactory.decodeFile(f.getPath(), o);
+            if (src == null) return null;
+            float s = Math.max((float) w / src.getWidth(), (float) h / src.getHeight());
+            while (s < 0.5f) {
+                Bitmap half = Bitmap.createScaledBitmap(src, Math.max(1, src.getWidth() / 2), Math.max(1, src.getHeight() / 2), true);
+                if (half != src) src.recycle();
+                src = half;
+                s = Math.max((float) w / src.getWidth(), (float) h / src.getHeight());
+            }
+            Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(out);
+            c.translate((w - src.getWidth() * s) / 2, (h - src.getHeight() * s) / 2);
+            c.scale(s, s);
+            c.drawBitmap(src, 0, 0, new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG
+                    | android.graphics.Paint.ANTI_ALIAS_FLAG));
+            src.recycle();
+            return out;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     // The wallpapers, each with a small dot of its colours or of the picture. Moving through the list
     // shows each one behind the panel; OK keeps it, Back goes back to the one before. Picture dots and
     // previews are decoded in the background, and dots are kept on disk, so the list opens at once.
@@ -634,14 +669,18 @@ public class MainActivity extends Activity {
         root.setMinimumHeight(bottomTop + h + px(MARGIN));
 
         String[] banners = new File(BANNERS).list();
+        glassBanners.clear();
         for (String pkg : apps) {
             Intent li = launchIntent(pm, pkg);
             if (li == null) continue;
             Drawable banner = null;
             String custom = Config.bannerFile(pkg, banners);
             if (custom != null) {
-                Bitmap b = crop(new File(BANNERS, custom), w, h);
-                if (b != null) banner = new BitmapDrawable(getResources(), b);
+                Bitmap b = sharp(new File(BANNERS, custom), w, h);
+                if (b != null) {
+                    banner = new BitmapDrawable(getResources(), b);
+                    glassBanners.add(pkg);
+                }
             }
             if (banner == null) try {
                 banner = pm.getActivityBanner(li);
@@ -707,7 +746,12 @@ public class MainActivity extends Activity {
         final GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(px(RADIUS));
         if (banner != null) {
-            bg.setColor(0xFF1E1A1C);
+            if (glassBanners.contains(key)) {
+                bg.setColor(0x13FFFFFF);
+                bg.setStroke(Math.max(1, px(2)), 0x17FFFFFF);
+            } else {
+                bg.setColor(0xFF1E1A1C);
+            }
             ImageView iv = new ImageView(this);
             iv.setImageDrawable(fit(banner, w, h));
             card.addView(iv, new FrameLayout.LayoutParams(-1, -1));
@@ -747,7 +791,7 @@ public class MainActivity extends Activity {
             caption.setVisibility(View.INVISIBLE);
         }
 
-        final boolean glass = banner == null;
+        final boolean glass = banner == null || glassBanners.contains(key);
         card.setOnFocusChangeListener((v, has) -> {
             if (has) focusedKey = key;
             if (glass) bg.setColor(has ? 0x38FFFFFF : 0x13FFFFFF);

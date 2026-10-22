@@ -12,6 +12,9 @@ public class ConfigTest {
         parseKeysRefusesNavigationAndSystemKeys();
         controllersAreNotRemapped();
         bannerFileMatchesThePackageOnly();
+        rotationIntervalsParse();
+        rotationCyclesThroughTheChosenOnly();
+        rotationIsDueAfterTheInterval();
         System.out.println("OK");
     }
 
@@ -61,5 +64,33 @@ public class ConfigTest {
         assert Config.bannerFile("com.spotify.tv.android", files) == null;
         assert Config.bannerFile("com.netflix", files) == null;
         assert Config.bannerFile("com.netflix.ninja", null) == null;
+    }
+
+    static void rotationIntervalsParse() {
+        assert Config.intervalMillis("30m") == 30L * 60 * 1000;
+        assert Config.intervalMillis("1h") == 3600L * 1000;
+        assert Config.intervalMillis("24h") == 24L * 3600 * 1000;
+        assert Config.intervalMillis("1w") == 7L * 24 * 3600 * 1000;
+        assert Config.intervalMillis("10s") == 10L * 1000;
+        assert Config.intervalMillis("off") == 0;
+        assert Config.intervalMillis(null) == 0;
+        assert Config.intervalMillis("x") == 0;
+        assert Config.intervalMillis("-5m") == 0;
+        assert Config.ROTATE_CHOICES.length == 7 && "off".equals(Config.ROTATE_CHOICES[0]) && "1w".equals(Config.ROTATE_CHOICES[6]);
+    }
+
+    static void rotationCyclesThroughTheChosenOnly() {
+        java.util.List<String> r = Arrays.asList("image:a.jpg", "Dusk", "image:b.png");
+        assert "Dusk".equals(Config.nextInRotation(r, "image:a.jpg"));
+        assert "image:a.jpg".equals(Config.nextInRotation(r, "image:b.png"));
+        assert "image:a.jpg".equals(Config.nextInRotation(r, "Ocean"));
+        assert Config.nextInRotation(new java.util.ArrayList<String>(), "Dusk") == null;
+    }
+
+    static void rotationIsDueAfterTheInterval() {
+        assert Config.rotationDue(1000, 1000 + 1800000, 1800000);
+        assert !Config.rotationDue(1000, 1000 + 1799999, 1800000);
+        assert !Config.rotationDue(0, 999999999, 0);
+        assert Config.rotationDue(5000, 1000, 1800000);
     }
 }

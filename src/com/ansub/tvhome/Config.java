@@ -69,4 +69,39 @@ final class Config {
         }
         return null;
     }
+
+    // Wallpaper rotation: the choices offered on the TV, as "<number><s|m|h|w>"; "off" or anything
+    // else that doesn't parse means no rotation.
+    static final String[] ROTATE_CHOICES = {"off", "30m", "1h", "4h", "12h", "24h", "1w"};
+
+    static long intervalMillis(String s) {
+        if (s == null || s.length() < 2) return 0;
+        long unit;
+        switch (s.charAt(s.length() - 1)) {
+            case 's': unit = 1000L; break;
+            case 'm': unit = 60 * 1000L; break;
+            case 'h': unit = 3600 * 1000L; break;
+            case 'w': unit = 7 * 24 * 3600 * 1000L; break;
+            default: return 0;
+        }
+        try {
+            long n = Long.parseLong(s.substring(0, s.length() - 1));
+            return n > 0 ? n * unit : 0;
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    // The wallpaper after current in the rotation, wrapping around; the first one if current isn't in it.
+    static String nextInRotation(java.util.List<String> rotation, String current) {
+        if (rotation.isEmpty()) return null;
+        int i = rotation.indexOf(current);
+        return rotation.get(i < 0 ? 0 : (i + 1) % rotation.size());
+    }
+
+    // Due once interval has passed since the last change. A last change in the future (the clock was
+    // set back) counts as due, so the rotation can't get stuck.
+    static boolean rotationDue(long lastChange, long now, long interval) {
+        return interval > 0 && (now - lastChange >= interval || lastChange > now);
+    }
 }
