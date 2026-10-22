@@ -2,7 +2,7 @@
 # Checks the fork's additions on a TV that already runs this home. Unlike smoke-test.sh it never
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
-# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete. Name one to run only that.
+# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control. Name one to run only that.
 # The enabled accessibility services and the wallpaper are put back afterwards. The key map is reset to
 # extras.sh's default and hidden HDMI inputs are shown again (the app's settings can't be read from adb).
 #   sh ci/extras-test.sh <TV> postboot   right after a real restart, before any script: checks only
@@ -114,7 +114,13 @@ t_ambient() {
   apps_on || fail "Back didn't leave the ambient view"
 }
 
-bell() { ui | grep -o 'content-desc="Notifications[^"]*"' | head -1; }
+# The bell lives in Control Center's Alerts tile: open it with the cog (83), read, close.
+bell() {
+  sh_tv input keyevent 83; sleep 2
+  d=$(ui | grep -o 'content-desc="Notifications[^"]*"' | head -1)
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  echo "$d"
+}
 
 t_bell() {
   sh extras.sh "$TV" >/dev/null || fail "extras.sh failed"
@@ -139,8 +145,6 @@ hide() { sh_tv am start -n $ME/.MainActivity --es hidden_inputs "\"$1\"" --es st
 # Labels can be renamed (HDMI 1 -> PS5), so this counts tiles instead of reading names.
 t_hdmi() {
   P=com.tcl.tvinput/.TvPassThroughService/HW
-  # The bell can appear a moment after the home starts, which would change the count mid-test.
-  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -n "$(bell)" ] && break; sleep 1; done
   hide none 0; all0=$(tiles)
   hide "${P}15,${P}16,${P}17,${P}18" 1; none_shown=$(tiles)
   [ "$none_shown" -lt "$all0" ] || fail "hiding every HDMI input removed no tiles ($all0 -> $none_shown)"
@@ -284,6 +288,25 @@ t_delete() {
   rm -rf "$tmp"
 }
 
+# Apple TV style top: no big clock, one chip (time + avatar); the cog opens Control Center.
+t_control() {
+  home
+  ui | grep -q 'content-desc="chip"' || fail "no chip at the top right"
+  ui | grep -q 'content-desc="Network"' && fail "the old icon row is still there"
+  sh_tv input keyevent 83; sleep 2
+  x=$(ui)
+  echo "$x" | grep -q 'content-desc="control-center"' || fail "the cog didn't open Control Center"
+  for t in Wi-Fi Bluetooth Sound Picture Inputs Screensaver Alerts Wallpaper Settings Apps; do
+    echo "$x" | grep -q "text=\"$t\"" || fail "Control Center has no $t"
+  done
+  echo "$x" | grep -qE 'text="[A-Za-z]+, [0-9]{1,2} [A-Za-z]+ 20[0-9]{2}"' || fail "Control Center shows no full date"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+  ui | grep -q 'content-desc="control-center"' && fail "Back didn't close Control Center"
+  sh_tv am start -n $ME/.MainActivity --es open control >/dev/null; sleep 2
+  ui | grep -q 'content-desc="control-center"' || fail "open=control didn't open Control Center"
+  sh_tv input keyevent KEYCODE_BACK; sleep 1
+}
+
 # Right after a real restart: the remap service and the bell must be back on their own.
 t_postboot() {
   a11y | grep -q "com.ansub.tvhome/" || fail "KeyService not enabled after the restart: $(a11y)"
@@ -296,7 +319,7 @@ if [ "$ONLY" = postboot ]; then echo "== postboot"; t_postboot; echo PASS; exit 
 saved=$(a11y)
 trap 'sh_tv "settings put secure $A11Y '"'"'$saved'"'"'" >/dev/null 2>&1' EXIT
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete; do
+for t in baseline keys wallpaper ambient bell hdmi boot apps banner info perf rotate delete control; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"

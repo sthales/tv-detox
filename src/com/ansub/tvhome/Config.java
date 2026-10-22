@@ -104,4 +104,28 @@ final class Config {
     static boolean rotationDue(long lastChange, long now, long interval) {
         return interval > 0 && (now - lastChange >= interval || lastChange > now);
     }
+
+    // The screensaver's slow zoom-and-pan for picture number seed: {startScale, endScale, startX,
+    // startY, endX, endY}, with x/y as a fraction of the view. Zooms in or out by 8-12% and drifts
+    // between two corners, never past the picture's edge: |offset| <= (scale - 1) / 2.
+    static float[] drift(int seed) {
+        java.util.Random r = new java.util.Random(seed * 7919L + 17);
+        float small = 1.02f, big = 1.10f + r.nextFloat() * 0.04f;
+        boolean zoomIn = r.nextBoolean();
+        float s0 = zoomIn ? small : big, s1 = zoomIn ? big : small;
+        int corner = r.nextInt(4);
+        float[] d = {s0, s1, 0, 0, 0, 0};
+        float m0 = (s0 - 1) / 2, m1 = (s1 - 1) / 2;
+        float sx = (corner & 1) == 0 ? -1 : 1, sy = (corner & 2) == 0 ? -1 : 1;
+        d[2] = sx * m0; d[3] = sy * m0;
+        d[4] = -sx * m1; d[5] = -sy * m1;
+        return d;
+    }
+
+    // Bing's caption is "Title (© credit)": the title only.
+    static String bingTitle(String copyright) {
+        if (copyright == null) return "";
+        int i = copyright.indexOf(" (\u00a9");
+        return (i > 0 ? copyright.substring(0, i) : copyright).trim();
+    }
 }

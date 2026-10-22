@@ -24,9 +24,7 @@ import android.media.tv.TvContract;
 import android.media.tv.TvInputInfo;
 import android.media.tv.TvInputManager;
 import android.net.ConnectivityManager;
-import android.net.Network;
 import android.net.NetworkCapabilities;
-import android.net.NetworkRequest;
 import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Bundle;
@@ -78,13 +76,7 @@ public class MainActivity extends Activity {
     private static final String[] EDIT_ITEMS_SYSTEM = {"Move", "Replace", "Remove from home", "App info"};
     private static final int PER_ROW = 6, MAX_INPUTS = 4;
 
-    // Settings shortcuts: name, label, icon. Tile keys are QUICK + name.
-    private static final String QUICK = "quick:";
-    private static final String[] QUICK_NAMES = {"bluetooth", "sound", "picture"};
-    private static final String[] QUICK_LABELS = {"Bluetooth", "Sound", "Picture"};
-    private static final int[][] QUICK_ICONS = {LineIcon.BLUETOOTH, LineIcon.SOUND, LineIcon.PICTURE};
-    private static final String NETWORK = "network";
-    private static final String NOTIFS = "notifs";
+    private static final String CHIP = "chip";
     private static final int OFFLINE = 0, ETHERNET = 4; // network states; 1 to 3 are Wi-Fi bars
     // TCL keeps its own Picture and Sound panels in a service; Android's Sound page is missing there.
     private static final String TCL_SHOW_WINDOW = "com.tcl.settings.SHOW_WINDOW";
@@ -93,7 +85,7 @@ public class MainActivity extends Activity {
     private static final int MARGIN = 96, GAP = 36, RADIUS = 22;
     private static final int ROW1_TOP = 604, ROW_STEP = 224;
     private static final int GRID_MIN_TOP = 400; // more rows push the grid up, but not into the clock
-    private static final int ICON_TOP = 76, ICON_BUTTON = 72, ICON_SIZE = 40, ICON_GAP = 12; // level with the date
+    private static final int ICON_TOP = 76; // the chip's top
 
     // The Settings tile opens a small menu: the home screen's own settings, then the TV's.
     private static final String[] SETTINGS_ITEMS = {"Wallpaper", "Brightness", "TV settings"};
@@ -180,18 +172,9 @@ public class MainActivity extends Activity {
 
     // The network tile follows the connection live: Wi-Fi bars, Ethernet or Offline. Only its icon and
     // label change, so nothing is rebuilt.
-    private ImageView netIcon;
-    private ImageView bellIcon; // null while the app has no notification access
+    private TextView alertsTile; // Control Center's Alerts tile while the panel is open
+    private Dialog controlCenter;
     private final Runnable bellChanged = this::refreshBell;
-    private int netState = -1;
-    private final ConnectivityManager.NetworkCallback networkChanged = new ConnectivityManager.NetworkCallback() {
-        @Override public void onAvailable(Network n) { runOnUiThread(MainActivity.this::refreshNetwork); }
-        @Override public void onLost(Network n) { runOnUiThread(MainActivity.this::refreshNetwork); }
-        // Also fires when the Wi-Fi signal gets stronger or weaker.
-        @Override public void onCapabilitiesChanged(Network n, NetworkCapabilities c) {
-            runOnUiThread(MainActivity.this::refreshNetwork);
-        }
-    };
 
     @Override
     protected void onCreate(Bundle state) {
@@ -210,22 +193,8 @@ public class MainActivity extends Activity {
         scroller.addView(root, new FrameLayout.LayoutParams(-1, -2));
         showWallpaper(wallpaper());
 
-        LinearLayout clock = new LinearLayout(this);
-        clock.setOrientation(LinearLayout.VERTICAL);
         shownLocale = java.util.Locale.getDefault();
-        String day = Strings.datePattern();
-        TextClock date = clock(day, day, px(30), 0xA8FFFFFF, regular);
-        TextClock time = clock("h:mm", "H:mm", px(176), Color.WHITE, semibold);
-        time.setLetterSpacing(-0.028f);
-        time.setFontFeatureSettings("tnum");
-        time.setIncludeFontPadding(false);
-        // Wrap, not the default match_parent: the column must be as wide as the date, not just the time,
-        // or "0:00" to "9:59" (one digit less) cuts a long date off.
-        clock.addView(date, new LinearLayout.LayoutParams(-2, -2));
-        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-2, -2);
-        tp.topMargin = px(-20); // pull the big digits up under the date
-        clock.addView(time, tp);
-        root.addView(clock, at(px(MARGIN), px(92), -2, -2));
+        openFrom(getIntent());
 
         moveHint = text(px(24), 0xA8FFFFFF, regular);
         moveHint.setText(Strings.t("Use the arrows to move it, then press OK"));
@@ -252,19 +221,12 @@ public class MainActivity extends Activity {
 
         NotifService.onChange = bellChanged;
 
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (cm != null) try {
-            if (android.os.Build.VERSION.SDK_INT >= 24) cm.registerDefaultNetworkCallback(networkChanged);
-            else cm.registerNetworkCallback(new NetworkRequest.Builder().build(), networkChanged);
-        } catch (Exception ignored) {}
     }
 
     @Override
     protected void onDestroy() {
         if (NotifService.onChange == bellChanged) NotifService.onChange = null;
         unregisterReceiver(packagesChanged);
-        ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-        if (cm != null) try { cm.unregisterNetworkCallback(networkChanged); } catch (Exception ignored) {}
         super.onDestroy();
     }
 
@@ -272,6 +234,7 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
+        openFrom(intent);
         if (saveConfig(intent)) {
             showWallpaper(wallpaper());
             buildTiles();
@@ -289,11 +252,13 @@ public class MainActivity extends Activity {
         String wall = intent == null ? null : intent.getStringExtra("wallpaper");
         String hidden = intent == null ? null : intent.getStringExtra("hidden_inputs");
         String rotate = intent == null ? null : intent.getStringExtra("rotate");
+        String name = intent == null ? null : intent.getStringExtra("name");
+        String avatar = intent == null ? null : intent.getStringExtra("avatar"); // avatar.sh: redraw only
         String rotation = intent == null ? null : intent.getStringExtra("rotation");
         // banner.sh only needs the tiles redrawn; the picture itself is the file.
         String banner = intent == null ? null : intent.getStringExtra("banner");
         if (apps == null && quick == null && keys == null && wall == null && hidden == null && banner == null
-                && rotate == null && rotation == null) return false;
+                && rotate == null && rotation == null && name == null && avatar == null) return false;
         SharedPreferences prefs = getSharedPreferences(PREFS, 0);
         String stamp = intent.getStringExtra("stamp");
         if (stamp != null && stamp.equals(prefs.getString("stamp", null))) return false;
@@ -313,6 +278,7 @@ public class MainActivity extends Activity {
         if (wall != null) e.putString("wallpaper", wall.trim());
         if (rotate != null) e.putString("rotate", rotate.trim()).putLong("rotate_at", System.currentTimeMillis());
         if (rotation != null) e.putString("rotation", Config.joinSet(Config.splitSet(rotation)));
+        if (name != null) e.putString("name", name.trim());
         if (hidden != null) {
             if (hidden.trim().equalsIgnoreCase("none")) e.remove("hidden_inputs");
             else e.putString("hidden_inputs", Config.joinSet(Config.splitSet(hidden)));
@@ -351,7 +317,6 @@ public class MainActivity extends Activity {
             dirty = false;
             buildTiles();
         }
-        refreshNetwork();
         healServices();
         rotateIfDue();
         View f = getCurrentFocus();
@@ -826,27 +791,9 @@ public class MainActivity extends Activity {
         addTile(root, SETTINGS, Strings.t("Settings"), null, LineIcon.SETTINGS, null, m + col++ * (w + g), bottomTop, w, h);
         addTile(root, ADD, Strings.t("Apps"), null, LineIcon.APPS, null, m + col * (w + g), bottomTop, w, h);
 
-        // Plain icons at the top right, level with the date: any settings shortcuts picked, then the
-        // network icon. Added last, so the first app keeps first focus; Up from the apps reaches them.
-        List<Integer> quick = quickList();
-        int ib = px(ICON_BUTTON), ig = px(ICON_GAP);
-        // The last icon's right edge lines up with the apps' (its focus circle sticks out past them).
-        int icons = quick.size() + (NotifService.live != null ? 1 : 0);
-        int qx = getResources().getDisplayMetrics().widthPixels - m + (ib - px(ICON_SIZE)) / 2
-                - (icons + 1) * ib - icons * ig;
-        for (int q : quick) {
-            addIcon(QUICK + QUICK_NAMES[q], Strings.t(QUICK_LABELS[q]), new LineIcon(QUICK_ICONS[q]), qx);
-            qx += ib + ig;
-        }
-        bellIcon = null;
-        if (NotifService.live != null) {
-            bellIcon = addIcon(NOTIFS, Strings.t("Notifications"), null, qx);
-            qx += ib + ig;
-            refreshBell();
-        }
-        netIcon = addIcon(NETWORK, Strings.t("Network"), null, qx);
-        netState = -1;
-        refreshNetwork();
+        // Top right, Apple TV style: one glass chip with the time and the avatar. Added last, so the
+        // first app keeps first focus; Up from the apps reaches it. OK opens Control Center.
+        addChip();
 
         root.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         // An app that was uninstalled hands focus to the one now in its place, as Remove does.
@@ -963,34 +910,6 @@ public class MainActivity extends Activity {
         tiles.add(card);
     }
 
-    // An icon on its own, no tile or label: a glass circle shows behind it only while it's focused.
-    private ImageView addIcon(final String key, String label, Drawable icon, int x) {
-        int b = px(ICON_BUTTON), size = px(ICON_SIZE);
-        FrameLayout card = new FrameLayout(this);
-        final GradientDrawable bg = new GradientDrawable();
-        bg.setShape(GradientDrawable.OVAL);
-        bg.setColor(Color.TRANSPARENT);
-        card.setBackground(bg);
-        ImageView iv = new ImageView(this);
-        iv.setImageDrawable(icon);
-        card.addView(iv, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
-        card.setFocusable(true);
-        card.setTag(key);
-        card.setContentDescription(label);
-        card.setOnFocusChangeListener((v, has) -> {
-            if (has) focusedKey = key;
-            bg.setColor(has ? 0x38FFFFFF : Color.TRANSPARENT);
-            v.animate().scaleX(has ? 1.1f : 1f).scaleY(has ? 1.1f : 1f).setDuration(140).withLayer().start();
-        });
-        card.setOnClickListener(v -> open(key));
-        FrameLayout wrap = new FrameLayout(this);
-        wrap.setClipChildren(false);
-        wrap.addView(card, new FrameLayout.LayoutParams(b, b));
-        root.addView(wrap, at(x, px(ICON_TOP), b, b));
-        tiles.add(card);
-        return iv;
-    }
-
     private void open(String key) {
         Intent i;
         if (ADD.equals(key)) {
@@ -1011,15 +930,6 @@ public class MainActivity extends Activity {
             return;
         } else if (isInput(key)) {
             openInput(key);
-            return;
-        } else if (NOTIFS.equals(key)) {
-            showNotifications();
-            return;
-        } else if (NETWORK.equals(key)) {
-            openNetworkSettings();
-            return;
-        } else if (key.startsWith(QUICK)) {
-            openQuick(key.substring(QUICK.length()));
             return;
         } else {
             i = launchIntent(getPackageManager(), key);
@@ -1060,20 +970,6 @@ public class MainActivity extends Activity {
         }
     }
 
-    // The shortcuts picked with --es quick, in that order, as indexes into QUICK_NAMES. A shortcut
-    // this TV has no screen for is left out, so it never shows a tile that does nothing.
-    private List<Integer> quickList() {
-        List<Integer> out = new ArrayList<>();
-        String saved = getSharedPreferences(PREFS, 0).getString("quick", null);
-        if (saved == null) return out;
-        for (String name : saved.split("[,\\s]+")) {
-            int q = Arrays.asList(QUICK_NAMES).indexOf(name.toLowerCase(java.util.Locale.ROOT));
-            if (q < 0 || out.contains(q) || quickIntents(QUICK_NAMES[q]).isEmpty()) continue;
-            out.add(q);
-        }
-        return out;
-    }
-
     // OFFLINE, 1 to 3 for Wi-Fi with that many bars, or ETHERNET (any other link, which on a TV is a cable).
     private int networkState() {
         ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -1100,48 +996,280 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void refreshNetwork() {
-        if (netIcon == null) return;
-        int state = networkState();
-        if (state == netState) return;
-        netState = state;
-        if (state == ETHERNET) {
-            netIcon.setImageDrawable(new LineIcon(LineIcon.ETHERNET));
-        } else {
-            // The whole Wi-Fi fan dim, with the bars it has bright on top. Offline is a slash instead.
-            LineIcon fan = new LineIcon(LineIcon.WIFI);
-            fan.setAlpha(0x47);
-            int[] top = state == OFFLINE ? LineIcon.SLASH : state == 1 ? LineIcon.WIFI_1
-                    : state == 2 ? LineIcon.WIFI_2 : LineIcon.WIFI;
-            netIcon.setImageDrawable(new LayerDrawable(new Drawable[] {fan, new LineIcon(top)}));
-        }
-        ((View) netIcon.getParent()).setContentDescription(
-                state == OFFLINE ? Strings.t("Offline") : state == ETHERNET ? "Ethernet" : "Wi-Fi");
-    }
 
-    // The bell: how many notifications there are, with a dot when one arrived since the list was last opened.
+    // The Alerts tile: how many notifications there are, and "new" when one arrived since the list was
+    // last opened. Without notification access it just says Alerts.
     private void refreshBell() {
-        if ((NotifService.live != null) != (bellIcon != null)) {
-            dirty = true;
-            refreshApps();
+        if (alertsTile == null) return;
+        View tile = (View) alertsTile.getParent();
+        if (NotifService.live == null) {
+            tile.setContentDescription(Strings.t("Alerts"));
             return;
         }
-        if (bellIcon == null || !hasWindowFocus()) return;
         int count = NotifService.list().size();
         boolean unseen = NotifService.lastPosted() > getSharedPreferences(PREFS, 0).getLong("bell_seen", 0);
-        Drawable bell = new LineIcon(LineIcon.BELL);
-        if (unseen) {
-            GradientDrawable dot = new GradientDrawable();
-            dot.setShape(GradientDrawable.OVAL);
-            dot.setColor(0xFFFF5A5A);
-            LayerDrawable both = new LayerDrawable(new Drawable[] {bell, dot});
-            int s = px(ICON_SIZE);
-            both.setLayerInset(1, s * 2 / 3, 0, 0, s * 2 / 3);
-            bell = both;
+        alertsTile.setText(count > 0 ? Strings.t("Alerts") + " · " + count : Strings.t("Alerts"));
+        tile.setContentDescription(Strings.t("Notifications") + " " + count + (unseen ? " new" : ""));
+    }
+
+    // --es open control (the cog from inside another app, through KeyService): show Control Center.
+    private void openFrom(Intent intent) {
+        if (intent == null || !"control".equals(intent.getStringExtra("open"))) return;
+        intent.removeExtra("open");
+        ui.post(() -> { if (controlCenter == null) showControlCenter(); });
+    }
+
+    // The chip at the top right: time and avatar on glass.
+    private void addChip() {
+        LinearLayout chip = new LinearLayout(this);
+        chip.setOrientation(LinearLayout.HORIZONTAL);
+        chip.setGravity(Gravity.CENTER_VERTICAL);
+        chip.setPadding(px(26), px(8), px(8), px(8));
+        final GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(px(40));
+        bg.setColor(0x24FFFFFF);
+        bg.setStroke(Math.max(1, px(2)), 0x30FFFFFF);
+        chip.setBackground(bg);
+        TextClock time = clock("h:mm", "H:mm", px(32), Color.WHITE, semibold);
+        time.setFontFeatureSettings("tnum");
+        LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-2, -2);
+        tp.rightMargin = px(14);
+        chip.addView(time, tp);
+        chip.addView(avatar(px(52)), new LinearLayout.LayoutParams(px(52), px(52)));
+        chip.setFocusable(true);
+        chip.setTag(CHIP);
+        chip.setContentDescription("chip");
+        chip.setOnFocusChangeListener((v, has) -> {
+            if (has) focusedKey = CHIP;
+            bg.setColor(has ? 0x52FFFFFF : 0x24FFFFFF);
+            v.animate().scaleX(has ? 1.08f : 1f).scaleY(has ? 1.08f : 1f).setDuration(140).withLayer().start();
+        });
+        chip.setOnClickListener(v -> showControlCenter());
+        FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(-2, -2, Gravity.TOP | Gravity.END);
+        lp.topMargin = px(ICON_TOP - 6);
+        lp.rightMargin = px(MARGIN);
+        root.addView(chip, lp);
+        tiles.add(chip);
+    }
+
+    // The owner's picture in a circle (files/avatar.png or .jpg, from avatar.sh), else their initial
+    // on a gradient (--es name "Thales").
+    private File avatarFile() {
+        for (String n : new String[] {"avatar.png", "avatar.jpg"}) {
+            File f = new File(folder(""), n);
+            if (f.exists()) return f;
         }
-        bellIcon.setImageDrawable(bell);
-        ((View) bellIcon.getParent()).setContentDescription(
-                Strings.t("Notifications") + " " + count + (unseen ? " new" : ""));
+        return null;
+    }
+
+    private View avatar(int size) {
+        FrameLayout f = new FrameLayout(this);
+        File photo = avatarFile();
+        Bitmap b = photo == null ? null : sharp(photo, size, size);
+        if (b != null) {
+            Bitmap round = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+            android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+            p.setShader(new android.graphics.BitmapShader(b, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP));
+            new Canvas(round).drawCircle(size / 2f, size / 2f, size / 2f, p);
+            f.setBackground(new BitmapDrawable(getResources(), round));
+            return f;
+        }
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.TL_BR, new int[] {0xFFFF7A59, 0xFFA855F7, 0xFF3B82F6});
+        g.setShape(GradientDrawable.OVAL);
+        f.setBackground(g);
+        String name = getSharedPreferences(PREFS, 0).getString("name", "");
+        if (!name.isEmpty()) {
+            TextView t = text(size * 45 / 100, Color.WHITE, semibold);
+            t.setText(name.substring(0, 1).toUpperCase(java.util.Locale.ROOT));
+            t.setGravity(Gravity.CENTER);
+            f.addView(t, new FrameLayout.LayoutParams(-1, -1));
+        }
+        return f;
+    }
+
+    // Control Center: a frosted panel on the right, like Apple TV's. Its glass is the wallpaper blurred
+    // once, not live. The cog or Back closes it.
+    private void showControlCenter() {
+        if (controlCenter != null) {
+            controlCenter.dismiss();
+            return;
+        }
+        final Dialog d = new Dialog(this, android.R.style.Theme_Material_Dialog_NoActionBar);
+        controlCenter = d;
+        final int w = px(600), pad = px(36), gap = px(14);
+        final int h = getResources().getDisplayMetrics().heightPixels - px(48);
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(pad, pad, pad, pad);
+        box.setContentDescription("control-center");
+        Bitmap glass = frosted(w, h);
+        box.setBackground(new LayerDrawable(new Drawable[] {
+                glass != null ? new BitmapDrawable(getResources(), glass) : new ColorDrawable(0xFF161113),
+                new ColorDrawable(0x66140F1A)}));
+        box.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override public void getOutline(View v, android.graphics.Outline o) {
+                o.setRoundRect(0, 0, v.getWidth(), v.getHeight(), px(36));
+            }
+        });
+        box.setClipToOutline(true);
+
+        // You, the full date, the time.
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        head.addView(avatar(px(72)), new LinearLayout.LayoutParams(px(72), px(72)));
+        LinearLayout who = new LinearLayout(this);
+        who.setOrientation(LinearLayout.VERTICAL);
+        who.setPadding(px(18), 0, 0, 0);
+        String name = getSharedPreferences(PREFS, 0).getString("name", "");
+        if (!name.isEmpty()) {
+            TextView n = text(px(28), Color.WHITE, semibold);
+            n.setText(name);
+            who.addView(n);
+        }
+        who.addView(clock("EEEE, d MMMM yyyy", "EEEE, d MMMM yyyy", px(22), 0xB3FFFFFF, regular));
+        head.addView(who, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextClock time = clock("h:mm", "H:mm", px(56), Color.WHITE, semibold);
+        time.setFontFeatureSettings("tnum");
+        head.addView(time);
+        box.addView(head);
+
+        TextView label = text(px(18), 0x99FFFFFF, semibold);
+        label.setText(Strings.t("Controls").toUpperCase(java.util.Locale.getDefault()));
+        label.setLetterSpacing(0.12f);
+        label.setPadding(0, px(30), 0, px(12));
+        box.addView(label);
+
+        // Wi-Fi, Bluetooth, Sound, Picture / Inputs, Screensaver, Alerts, Wallpaper / Settings, Apps.
+        final int tile = (w - 2 * pad - 3 * gap) / 4;
+        int net = networkState();
+        int[][] icons = {LineIcon.WIFI, LineIcon.BLUETOOTH, LineIcon.SOUND, LineIcon.PICTURE, LineIcon.INPUT,
+                LineIcon.MOON, LineIcon.BELL, LineIcon.FRAME, LineIcon.SETTINGS, LineIcon.APPS};
+        String[] labels = {net == OFFLINE ? Strings.t("Offline") : net == ETHERNET ? "Ethernet" : Strings.t("Wi-Fi"),
+                Strings.t("Bluetooth"), Strings.t("Sound"), Strings.t("Picture"), Strings.t("Inputs"),
+                Strings.t("Screensaver"), Strings.t("Alerts"), Strings.t("Wallpaper"), Strings.t("Settings"), Strings.t("Apps")};
+        Runnable[] actions = {this::openNetworkSettings, () -> openQuick("bluetooth"), () -> openQuick("sound"),
+                () -> openQuick("picture"), this::openInputs, () -> showAmbient(true), this::showNotifications,
+                () -> showWallpapers(null), this::openTvSettings, this::showAllApps};
+        LinearLayout row = null;
+        View first = null;
+        for (int i = 0; i < icons.length; i++) {
+            if (i % 4 == 0) {
+                row = new LinearLayout(this);
+                LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, tile);
+                if (i > 0) rp.topMargin = gap;
+                box.addView(row, rp);
+            }
+            final Runnable action = actions[i];
+            View t = controlTile(icons[i], labels[i], () -> {
+                d.dismiss();
+                action.run();
+            });
+            if (i == 6) alertsTile = (TextView) ((ViewGroup) t).getChildAt(1);
+            LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(tile, tile);
+            if (i % 4 > 0) cp.leftMargin = gap;
+            row.addView(t, cp);
+            if (first == null) first = t;
+        }
+        refreshBell();
+
+        // The latest notification, then "+N more"; OK opens the list.
+        List<android.service.notification.StatusBarNotification> list = NotifService.list();
+        if (!list.isEmpty()) {
+            TextView latest = text(px(20), 0xD9FFFFFF, regular);
+            android.os.Bundle x = list.get(0).getNotification().extras;
+            CharSequence title = x == null ? null : x.getCharSequence(android.app.Notification.EXTRA_TITLE);
+            latest.setText(labelOf(list.get(0).getPackageName()) + (title != null ? " · " + title : "")
+                    + (list.size() > 1 ? "   +" + (list.size() - 1) + " " + Strings.t("more") : ""));
+            latest.setSingleLine(true);
+            latest.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            latest.setPadding(px(20), px(16), px(20), px(16));
+            final GradientDrawable lb = new GradientDrawable();
+            lb.setCornerRadius(px(20));
+            lb.setColor(0x1FFFFFFF);
+            latest.setBackground(lb);
+            latest.setFocusable(true);
+            latest.setOnFocusChangeListener((v, has) -> lb.setColor(has ? 0x52FFFFFF : 0x1FFFFFFF));
+            latest.setOnClickListener(v -> {
+                d.dismiss();
+                showNotifications();
+            });
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.topMargin = px(28);
+            box.addView(latest, lp);
+        }
+
+        d.setContentView(box);
+        d.setOnKeyListener((di, code, ev) -> {
+            if (code != KeyEvent.KEYCODE_NOTIFICATION) return false;
+            if (ev.getAction() == KeyEvent.ACTION_UP) d.dismiss();
+            return true;
+        });
+        d.setOnDismissListener(di -> {
+            if (controlCenter == d) controlCenter = null;
+            alertsTile = null;
+        });
+        Window win = d.getWindow();
+        win.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        win.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        android.view.WindowManager.LayoutParams lp = win.getAttributes();
+        lp.width = w;
+        lp.height = h;
+        lp.x = px(24);
+        win.setAttributes(lp);
+        win.setDimAmount(0.3f);
+        d.show();
+        if (first != null) first.requestFocus();
+    }
+
+    // One square control: icon over label, on glass; focused it turns white with dark content, like tvOS.
+    private View controlTile(int[] icon, String label, final Runnable action) {
+        LinearLayout t = new LinearLayout(this);
+        t.setOrientation(LinearLayout.VERTICAL);
+        t.setGravity(Gravity.CENTER);
+        final GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(px(24));
+        bg.setColor(0x24FFFFFF);
+        t.setBackground(bg);
+        final LineIcon li = new LineIcon(icon);
+        ImageView iv = new ImageView(this);
+        iv.setImageDrawable(li);
+        t.addView(iv, new LinearLayout.LayoutParams(px(40), px(40)));
+        final TextView tv = text(px(18), 0xE6FFFFFF, regular);
+        tv.setText(label);
+        tv.setSingleLine(true);
+        tv.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        tv.setGravity(Gravity.CENTER);
+        tv.setPadding(px(6), px(8), px(6), 0);
+        t.addView(tv, new LinearLayout.LayoutParams(-1, -2));
+        t.setFocusable(true);
+        t.setOnFocusChangeListener((v, has) -> {
+            bg.setColor(has ? 0xF2FFFFFF : 0x24FFFFFF);
+            li.setColorFilter(has ? new android.graphics.PorterDuffColorFilter(0xFF1C1820, android.graphics.PorterDuff.Mode.SRC_IN) : null);
+            tv.setTextColor(has ? 0xFF1C1820 : 0xE6FFFFFF);
+            v.animate().scaleX(has ? 1.06f : 1f).scaleY(has ? 1.06f : 1f).setDuration(120).start();
+        });
+        t.setOnClickListener(v -> action.run());
+        return t;
+    }
+
+    // The panel's glass: the part of the wallpaper behind it, blurred by shrinking it and growing it back.
+    private Bitmap frosted(int w, int h) {
+        Bitmap wall = wallpaperBitmap(wallpaper());
+        if (wall == null) wall = wallpaperBitmap(WALLPAPER_NAMES[0]);
+        if (wall == null) return null;
+        int sw = wall.getWidth(), sh = wall.getHeight();
+        int x = Math.max(0, sw - w - px(24)), y = Math.max(0, (sh - h) / 2);
+        Bitmap part = Bitmap.createBitmap(wall, x, y, Math.min(w, sw - x), Math.min(h, sh - y));
+        Bitmap small = Bitmap.createScaledBitmap(part, Math.max(1, part.getWidth() / 24), Math.max(1, part.getHeight() / 24), true);
+        Bitmap mid = Bitmap.createScaledBitmap(small, Math.max(1, part.getWidth() / 6), Math.max(1, part.getHeight() / 6), true);
+        return Bitmap.createScaledBitmap(mid, w, h, true);
+    }
+
+    // TCL's input picker, else Android's settings.
+    private void openInputs() {
+        Intent i = launchIntent(getPackageManager(), "com.tcl.suspension");
+        if (i == null) i = new Intent(Settings.ACTION_SETTINGS);
+        try { startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) {}
     }
 
     // The notifications, newest first: app, title and text. OK opens one and clears it if it can be
@@ -1207,6 +1335,10 @@ public class MainActivity extends Activity {
     // Info on the home shows TCL's signal panel (resolution, HDR). Apps in front get the key as usual.
     @Override
     public boolean onKeyUp(int code, KeyEvent event) {
+        if (code == KeyEvent.KEYCODE_NOTIFICATION) { // the cog on this TV's remote
+            showControlCenter();
+            return true;
+        }
         if (code == KeyEvent.KEYCODE_INFO) {
             Intent info = tclWindow("info");
             if (info != null) try { startService(info); return true; } catch (Exception ignored) {}

@@ -15,6 +15,8 @@ public class ConfigTest {
         rotationIntervalsParse();
         rotationCyclesThroughTheChosenOnly();
         rotationIsDueAfterTheInterval();
+        driftStaysInsideThePicture();
+        bingTitleDropsTheCredit();
         System.out.println("OK");
     }
 
@@ -92,5 +94,25 @@ public class ConfigTest {
         assert !Config.rotationDue(1000, 1000 + 1799999, 1800000);
         assert !Config.rotationDue(0, 999999999, 0);
         assert Config.rotationDue(5000, 1000, 1800000);
+    }
+
+    // {startScale, endScale, startX, startY, endX, endY}: x/y are offsets as a fraction of the view.
+    // A picture scaled by s covers the view as long as |offset| <= (s - 1) / 2.
+    static void driftStaysInsideThePicture() {
+        for (int seed = 0; seed < 50; seed++) {
+            float[] d = Config.drift(seed);
+            assert d[0] >= 1f && d[1] >= 1f && d[0] <= 1.15f && d[1] <= 1.15f : java.util.Arrays.toString(d);
+            assert Math.abs(d[1] - d[0]) >= 0.05f : "too little zoom " + java.util.Arrays.toString(d);
+            assert Math.abs(d[2]) <= (d[0] - 1) / 2 + 1e-6 && Math.abs(d[3]) <= (d[0] - 1) / 2 + 1e-6 : java.util.Arrays.toString(d);
+            assert Math.abs(d[4]) <= (d[1] - 1) / 2 + 1e-6 && Math.abs(d[5]) <= (d[1] - 1) / 2 + 1e-6 : java.util.Arrays.toString(d);
+        }
+        assert !java.util.Arrays.equals(Config.drift(1), Config.drift(2));
+    }
+
+    static void bingTitleDropsTheCredit() {
+        assert "Outono no Parque Nacional Naejangsan, Coreia do Sul".equals(
+                Config.bingTitle("Outono no Parque Nacional Naejangsan, Coreia do Sul (© Twenty47studio/Getty Images)"));
+        assert "Plain".equals(Config.bingTitle("Plain"));
+        assert "".equals(Config.bingTitle(null));
     }
 }

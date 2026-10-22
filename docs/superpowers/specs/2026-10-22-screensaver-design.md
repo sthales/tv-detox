@@ -82,9 +82,22 @@ They also want a small "now playing" chip on the home and the screensaver.
 - **Order:** chosen local pictures and enabled online pictures shuffled once per screensaver start, then cycled.
 - **Captions** only on online pictures: bottom-right, small, `title · Bing` / `· NASA`. Bing's title is the part of `copyright` before " (©".
 - **Screensaver layout:** clock (large time, small date) bottom-left, now-playing under it, caption bottom-right. A dark gradient at the bottom keeps text readable.
-- **The dream is non-interactive** (`setInteractive(false)`): any key wakes the TV.
 - **`extras.sh`** sets `screensaver_components` to our dream, keeps the `AUTO_START` grant, and documents the one-line revert to `com.google.android.apps.tv.dreamx/.service.Backdrop`.
 - **Permission:** add `INTERNET`.
+
+## Settled after the builder check (Claude's calls)
+- **Downloads** run on the app process's background executor:
+  - Triggered when the home resumes or the dream starts.
+  - Not cancelled when the home pauses.
+  - Once-a-day per source on success; on failure, retry no sooner than 1 hour later.
+- **The TV toggle "Use as TV screensaver" is the master:**
+  - When it's on, the home re-applies `screensaver_components` (plus `screensaver_enabled=1`) in `onResume` if the value differs, the same way `healServices` repairs things.
+  - `extras.sh` doesn't set the component; it only keeps the `WRITE_SECURE_SETTINGS` / `AUTO_START` grants.
+  - Default after install: **on**, applied the first time the home starts with the new build.
+- **Turning it off** restores the value saved the first time it was turned on (today Google's `dreamx/.service.Backdrop`). If nothing was saved, it falls back to Backdrop.
+- **Media keys** (`MEDIA_PLAY_PAUSE`, `MEDIA_PLAY`, `MEDIA_PAUSE`, `MEDIA_NEXT`, `MEDIA_PREVIOUS`) control playback **without leaving** the screensaver or the Back view. Every other key exits.
+  - The dream is **interactive** and forwards media keys to the active session's `MediaController.dispatchMediaButtonEvent`; any other key calls `finish()`.
+- **Online sources default on** (Places, Earth, Space). The downloads test doesn't need to switch them on.
 
 ## Left to the builder
 
@@ -104,3 +117,37 @@ On the TV, after a reboot:
 4. The chip appears on the home while Spotify or YouTube plays. ⏯ and ⏭ work, and OK opens the app.
 5. `perf` still passes, and the home's background memory doesn't grow by more than ~10 MB.
 6. Turning "Use as TV screensaver" off brings Google's screensaver back.
+
+## Addendum: home redesign and Control Center (user decision, 2026-10-22)
+
+The user chose mockup **B (Apple TV style)** plus Control Center **C**.
+
+### Home (top area)
+- The big clock and the date are **removed**. The top-right icon row (Bluetooth, Sound, Picture, Network, bell) is **removed**.
+- Top right is **one glass chip**: `[album art ⏯]` (only while something is playing or paused) + **time** + **avatar**.
+  - The avatar shows initials on a gradient until a photo is provided (`avatar.sh <TV> photo.jpg` → `files/avatar.png`, cropped to a circle).
+  - **OK on ⏯** toggles play/pause.
+  - **OK on the time/avatar part** opens Control Center.
+
+### Control Center
+- Opens with the **cog button (key 83)** from anywhere (through the key map), and with OK on the chip.
+- For now it is hosted by the home: from another app, the cog brings the home to the front with the panel open.
+- A **frosted panel** on the right, about 31% of the width. Its background is the current wallpaper **blurred once** (scaled down and back up) and darkened. Nothing is blurred live.
+- Contents, top to bottom:
+  - avatar, name, **full date** and **time**
+  - a **now-playing card** (art, app, title, artist, ⏮ ⏯ ⏭), only when there is a session
+  - a **controls grid**, four per row:
+    - **Wi-Fi** (shows connected/SSID state; opens network settings)
+    - **Bluetooth**, **Sound**, **Picture** (TCL panels, as the old shortcuts did)
+    - **Inputs** (TCL's input picker)
+    - **Screensaver** (opens the screensaver view now)
+    - **Alerts** (count; opens the notification list)
+    - **Wallpaper**, **Settings** (TV settings), **Apps**
+  - the **latest notification** in one line, then "+N more"
+- Back or the cog closes it.
+- Game mode and Sleep are **later**.
+
+### Effects on the plan
+- **Now playing:** shown in the chip and in Control Center. The separate home chip with ⏯ ⏭ in the icon row is dropped. The screensaver still shows its now-playing line.
+- **The bell icon is gone.** The bell's list opens from the **Alerts** tile. Its count and "new" state move to that tile, with content-desc `Notifications N[ new]`.
+- **Key map:** the cog's default target becomes `@control` (a home action), replacing `com.android.tv.settings`. `KeyService` launches the home with `--es open control` for `@`-targets.

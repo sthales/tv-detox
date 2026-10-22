@@ -23,8 +23,11 @@ public class KeyService extends AccessibilityService {
             return false;
         }
         if (pkg == null) return false;
-        Intent launch = getPackageManager().getLeanbackLaunchIntentForPackage(pkg);
-        if (launch == null) launch = getPackageManager().getLaunchIntentForPackage(pkg);
+        Intent launch = pkg.startsWith("@") // a home action, e.g. "@control" opens Control Center
+                ? new Intent(this, MainActivity.class).putExtra("open", pkg.substring(1))
+                        .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
+                : getPackageManager().getLeanbackLaunchIntentForPackage(pkg);
+        if (launch == null && !pkg.startsWith("@")) launch = getPackageManager().getLaunchIntentForPackage(pkg);
         if (launch == null) return false;
         if (event.getAction() == KeyEvent.ACTION_UP) {
             try { startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); } catch (Exception ignored) {}
