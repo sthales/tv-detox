@@ -1,10 +1,11 @@
 #!/bin/sh
 # Turns on the fork's extras on a TV that runs this home: remote buttons that open apps.
-#   sh extras.sh <TV_IP>                           TCL button opens Stremio
+#   sh extras.sh <TV_IP>                           TCL button opens Stremio; Netflix, Prime Video and
+#                                                  YouTube buttons work again with Google TV's home off
 #   sh extras.sh <TV_IP> "4020:com.stremio.one"    key code:package, comma separated
 # Run it again after reinstalling the home.
 set -e
-TARGET="$1"; KEYS="${2:-4020:com.stremio.one}"
+TARGET="$1"; KEYS="${2:-4020:com.stremio.one,4062:com.netflix.ninja,4099:com.amazon.amazonvideo.livingroom,190:com.google.android.youtube.tv}"
 [ -n "$TARGET" ] || { echo "Usage: sh extras.sh <TV_IP> [\"keycode:package,...\"]" >&2; exit 1; }
 case "$TARGET" in
   *.*.*.*:*) TV=$TARGET ;;
