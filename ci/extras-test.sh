@@ -123,6 +123,8 @@ hide() { sh_tv am start -n $ME/.MainActivity --es hidden_inputs "\"$1\"" --es st
 # Labels can be renamed (HDMI 1 -> PS5), so this counts tiles instead of reading names.
 t_hdmi() {
   P=com.tcl.tvinput/.TvPassThroughService/HW
+  # The bell can appear a moment after the home starts, which would change the count mid-test.
+  for _ in 1 2 3 4 5 6 7 8 9 10; do [ -n "$(bell)" ] && break; sleep 1; done
   hide none 0; all0=$(tiles)
   hide "${P}15,${P}16,${P}17,${P}18" 1; none_shown=$(tiles)
   [ "$none_shown" -lt "$all0" ] || fail "hiding every HDMI input removed no tiles ($all0 -> $none_shown)"

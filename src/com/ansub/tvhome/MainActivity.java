@@ -286,7 +286,7 @@ public class MainActivity extends Activity {
             if (hidden.trim().equalsIgnoreCase("none")) e.remove("hidden_inputs");
             else e.putString("hidden_inputs", Config.joinSet(Config.splitSet(hidden)));
         }
-        e.apply();
+        e.commit(); // not apply(): a script may restart the TV or the app right after sending this
         dirty = true;
         return true;
     }
