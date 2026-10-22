@@ -14,6 +14,7 @@ public class KeyService extends AccessibilityService {
 
     @Override
     protected boolean onKeyEvent(KeyEvent event) {
+        if (Config.fromController(event.getSource())) return false;
         String pkg;
         try {
             pkg = Config.parseKeys(getSharedPreferences(MainActivity.PREFS, 0).getString("keys", null))

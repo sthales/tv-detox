@@ -9,7 +9,14 @@ import java.util.Set;
 final class Config {
     private Config() {}
 
-    // "4020:com.stremio.one,84:pkg" -> {4020=com.stremio.one, 84=pkg}. Entries that don't parse are skipped.
+    // Keys the map may never take: Home, Back, the arrows and OK, volume, power, Enter, Menu and the
+    // media keys. The map reaches a system-wide key filter, so a typo or another app's extra must not
+    // be able to swallow the keys every app needs.
+    private static final java.util.Set<Integer> RESERVED = new java.util.HashSet<>(java.util.Arrays.asList(
+            3, 4, 19, 20, 21, 22, 23, 24, 25, 26, 66, 82, 85, 86, 87, 88, 89, 90, 160, 164));
+
+    // "4020:com.stremio.one,84:pkg" -> {4020=com.stremio.one, 84=pkg}. Entries that don't parse, and
+    // reserved keys, are skipped.
     static Map<Integer, String> parseKeys(String s) {
         Map<Integer, String> out = new LinkedHashMap<>();
         if (s == null) return out;
@@ -18,10 +25,18 @@ final class Config {
             if (colon < 0) continue;
             String pkg = entry.substring(colon + 1).trim();
             if (pkg.isEmpty()) continue;
-            try { out.put(Integer.parseInt(entry.substring(0, colon).trim()), pkg); }
-            catch (NumberFormatException ignored) {}
+            try {
+                int code = Integer.parseInt(entry.substring(0, colon).trim());
+                if (!RESERVED.contains(code)) out.put(code, pkg);
+            } catch (NumberFormatException ignored) {}
         }
         return out;
+    }
+
+    // A key from a game controller (InputDevice SOURCE_GAMEPAD or SOURCE_JOYSTICK). Pads send key codes
+    // like 190 (BUTTON_3) that the map uses for the YouTube remote button, so they're never remapped.
+    static boolean fromController(int source) {
+        return (source & 0x401) == 0x401 || (source & 0x1000010) == 0x1000010;
     }
 
     // Wallpaper images: the picture formats Android decodes everywhere.

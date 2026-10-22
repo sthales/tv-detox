@@ -100,12 +100,12 @@ public class MainActivity extends Activity {
     // Android TV 11 and later (Google TV too) has no Display page, but its "Display & Sound" page holds Picture.
     private static final String[] TV_DISPLAY_SOUND = {"com.android.tv.settings",
             "com.android.tv.settings.device.displaysound.DisplaySoundActivity"};
+    // Wallpaper images, pushed by wallpaper.sh. The saved wallpaper is IMAGE + file name.
+    private static final String IMAGES = "/sdcard/Pictures/tvhome", IMAGE = "image:";
     // Wallpapers, saved by name: a gradient top to bottom, then a glow from the top left and one from
     // the bottom right. Dark ones first, then bright ones that get darker towards the bottom, so the
     // white labels stay easy to read. Only colours, no images, so every one costs the same as Dusk,
     // the default.
-    // Wallpaper images, pushed by wallpaper.sh. The saved wallpaper is IMAGE + file name.
-    private static final String IMAGES = "/sdcard/Pictures/tvhome", IMAGE = "image:";
     private static final String[] WALLPAPER_NAMES = {"Dusk", "Midnight", "Plum", "Forest", "Graphite", "Ocean", "Ember",
             "Sunset", "Lagoon", "Aurora", "Coral", "Iris", "Meadow", "Gold"};
     private static final int[][] WALLPAPERS = {
@@ -129,6 +129,10 @@ public class MainActivity extends Activity {
     private static Typeface regular, semibold;
 
     private ScrollView scroller;
+    // The last two pictures shown, so moving back and forth in the Wallpaper list doesn't decode again.
+    private final android.util.LruCache<String, Bitmap> decoded = new android.util.LruCache<>(2);
+    private final android.os.Handler ui = new android.os.Handler(android.os.Looper.getMainLooper());
+    private Runnable pendingPreview;
     // Back on the home hides the page and leaves the wallpaper and a small clock; any key brings it back.
     private boolean ambient;
     private FrameLayout ambientClock;
@@ -159,6 +163,7 @@ public class MainActivity extends Activity {
     // label change, so nothing is rebuilt.
     private ImageView netIcon;
     private ImageView bellIcon; // null while the app has no notification access
+    private final Runnable bellChanged = this::refreshBell;
     private int netState = -1;
     private final ConnectivityManager.NetworkCallback networkChanged = new ConnectivityManager.NetworkCallback() {
         @Override public void onAvailable(Network n) { runOnUiThread(MainActivity.this::refreshNetwork); }
@@ -226,7 +231,7 @@ public class MainActivity extends Activity {
         if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(packagesChanged, f, Context.RECEIVER_EXPORTED);
         else registerReceiver(packagesChanged, f);
 
-        NotifService.onChange = this::refreshBell;
+        NotifService.onChange = bellChanged;
 
         ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm != null) try {
@@ -237,7 +242,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        NotifService.onChange = null;
+        if (NotifService.onChange == bellChanged) NotifService.onChange = null;
         unregisterReceiver(packagesChanged);
         ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm != null) try { cm.unregisterNetworkCallback(networkChanged); } catch (Exception ignored) {}
@@ -356,7 +361,10 @@ public class MainActivity extends Activity {
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
-        if (hasFocus) refreshApps();
+        if (hasFocus) {
+            refreshApps();
+            refreshBell();
+        }
         else okDownKey = null; // an OK still held finishes in the window that took over
     }
 
@@ -447,8 +455,13 @@ public class MainActivity extends Activity {
     // clock and the apps so white text stays readable on any picture.
     private Drawable imageWallpaper(File f) {
         int w = getResources().getDisplayMetrics().widthPixels, h = getResources().getDisplayMetrics().heightPixels;
-        Bitmap b = crop(f, w, h);
-        if (b == null) return null;
+        String key = f.getPath() + "@" + f.lastModified();
+        Bitmap b = decoded.get(key);
+        if (b == null) {
+            b = crop(f, w, h);
+            if (b == null) return null;
+            decoded.put(key, b);
+        }
         GradientDrawable clock = radial(0x8C000000, 0f, 0f, px(1100));
         GradientDrawable apps = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[] {Color.TRANSPARENT, Color.TRANSPARENT, 0x99000000});
@@ -502,7 +515,13 @@ public class MainActivity extends Activity {
             dot.setStroke(Math.max(1, px(2)), 0x26FFFFFF);
             dot.setSize(size, size);
             return dot;
-        }, size, Math.max(0, names.indexOf(wallpaper())), pos -> showWallpaper(names.get(pos)), which -> {
+        }, size, Math.max(0, names.indexOf(wallpaper())), pos -> {
+            // Wait for the arrows to settle, so holding one doesn't decode every picture it passes.
+            ui.removeCallbacks(pendingPreview);
+            pendingPreview = () -> showWallpaper(names.get(pos));
+            ui.postDelayed(pendingPreview, 150);
+        }, which -> {
+            ui.removeCallbacks(pendingPreview);
             getSharedPreferences(PREFS, 0).edit().putString("wallpaper", names.get(which)).apply();
             showWallpaper(names.get(which));
         });
@@ -885,7 +904,7 @@ public class MainActivity extends Activity {
             refreshApps();
             return;
         }
-        if (bellIcon == null) return;
+        if (bellIcon == null || !hasWindowFocus()) return;
         int count = NotifService.list().size();
         boolean unseen = NotifService.lastPosted() > getSharedPreferences(PREFS, 0).getLong("bell_seen", 0);
         Drawable bell = new LineIcon(LineIcon.BELL);
@@ -929,7 +948,16 @@ public class MainActivity extends Activity {
             }
             android.service.notification.StatusBarNotification n = list.get(which);
             android.app.PendingIntent open = n.getNotification().contentIntent;
-            if (open != null) try { open.send(); } catch (Exception ignored) {}
+            if (open != null) try {
+                if (android.os.Build.VERSION.SDK_INT >= 34) {
+                    android.app.ActivityOptions o = android.app.ActivityOptions.makeBasic()
+                            .setPendingIntentBackgroundActivityStartMode(
+                                    android.app.ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+                    open.send(this, 0, null, null, null, null, o.toBundle());
+                } else {
+                    open.send();
+                }
+            } catch (Exception ignored) {}
             if (n.isClearable()) s.cancelNotification(n.getKey());
         });
     }
@@ -1281,7 +1309,7 @@ public class MainActivity extends Activity {
         return key.indexOf('/') > 0;
     }
 
-    // The TV's own HDMI inputs (not devices behind them), in order, skipping hidden ones.
+    // HDMI inputs hidden from the home with hold OK > Hide.
     private java.util.Set<String> hiddenInputs() {
         return Config.splitSet(getSharedPreferences(PREFS, 0).getString("hidden_inputs", null));
     }
@@ -1302,6 +1330,7 @@ public class MainActivity extends Activity {
         });
     }
 
+    // The TV's own HDMI inputs (not devices behind them), in order, skipping hidden ones.
     private List<TvInputInfo> hdmiInputs() {
         java.util.Set<String> hidden = hiddenInputs();
         List<TvInputInfo> out = new ArrayList<>();

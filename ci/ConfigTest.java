@@ -9,6 +9,8 @@ public class ConfigTest {
         parseKeysReadsCodeToPackage();
         isImageAcceptsPictureFilesOnly();
         setsRoundTripWithoutDuplicates();
+        parseKeysRefusesNavigationAndSystemKeys();
+        controllersAreNotRemapped();
         System.out.println("OK");
     }
 
@@ -36,5 +38,18 @@ public class ConfigTest {
         assert Config.joinSet(Config.splitSet(" x , ,y ")).equals("x,y");
         assert Config.splitSet("").isEmpty();
         assert Config.splitSet(null).isEmpty();
+    }
+
+    static void parseKeysRefusesNavigationAndSystemKeys() {
+        Map<Integer, String> k = Config.parseKeys("23:x,4:x,3:x,19:x,20:x,21:x,22:x,24:x,25:x,26:x,66:x,82:x,85:x,90:x,160:x,164:x,4020:s");
+        assert k.size() == 1 && "s".equals(k.get(4020)) : k;
+        assert Config.parseKeys("84:a,190:b,4062:c").size() == 3;
+    }
+
+    static void controllersAreNotRemapped() {
+        assert !Config.fromController(0x301);      // the TCL remote: keyboard | dpad
+        assert Config.fromController(0x401);       // SOURCE_GAMEPAD
+        assert Config.fromController(0x1000010);   // SOURCE_JOYSTICK
+        assert Config.fromController(0x501);       // keyboard | gamepad, how many pads report
     }
 }

@@ -3,6 +3,9 @@
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
 # Sections run in order: baseline keys wallpaper ambient bell hdmi boot. Name one to run only that.
+# The enabled accessibility services and the wallpaper are put back afterwards. The key map is reset to
+# extras.sh's default and hidden HDMI inputs are shown again (the app's settings can't be read from adb).
+#   sh ci/extras-test.sh <TV> postboot   right after a real restart, before any script: checks only
 set -e
 cd "$(dirname "$0")/.."
 TV="$1"; ONLY="$2"
@@ -32,8 +35,15 @@ t_baseline() {
 
 # Keys sent with "input keyevent" skip the accessibility filter, so only a real remote press proves
 # the remap. This checks the part a script can see: the service is on, bound and filtering keys.
+A11Y=enabled_accessibility_services
+OTHER='com.example.other/com.example.other.Outer$Svc'
+a11y() { sh_tv "settings get secure $A11Y"; }
+
 t_keys() {
+  sh_tv "settings put secure $A11Y '$OTHER:com.ansub.tvhome/com.ansub.tvhome.KeyService'"
   sh extras.sh "$TV" >/dev/null || fail "extras.sh failed"
+  a11y | tr ':' '\n' | grep -qxF "$OTHER" || fail "extras.sh damaged another service's entry: $(a11y)"
+  [ "$(a11y | tr ':' '\n' | grep -c '^com.ansub.tvhome/')" = 1 ] || fail "our service listed twice: $(a11y)"
   sh_tv settings get secure enabled_accessibility_services | grep -q "$ME/.KeyService" || fail "KeyService not enabled"
   sleep 2
   bound=$(sh_tv dumpsys accessibility | grep "Bound services")
@@ -41,6 +51,10 @@ t_keys() {
   echo "$bound" | grep -q "capabilities=8" || fail "KeyService can't filter keys"
   sh extras.sh "$TV" "4021:com.not.installed" >/dev/null
   home
+  sh extras.sh "$TV" "" >/dev/null
+  a11y | grep -q "com.ansub.tvhome/" && fail "an empty map left the key service on: $(a11y)"
+  sh_tv am force-stop $ME; home; sleep 2
+  a11y | grep -q "com.ansub.tvhome/" && fail "the home turned the service back on with no map: $(a11y)"
   sh extras.sh "$TV" >/dev/null
 }
 
@@ -57,6 +71,8 @@ shown() { ui | grep -o 'content-desc="wallpaper:[^"]*"' | head -1; }
 t_wallpaper() {
   home; was=$(shown | sed 's/.*wallpaper:\([^"]*\)"/\1/'); was=${was:-Dusk}
   tmp=$(mktemp -d)
+  echo GIF89a > "$tmp/tvhome-test.gif"
+  sh wallpaper.sh "$TV" "$tmp/tvhome-test.gif" >/dev/null 2>&1 && fail "wallpaper.sh accepted a .gif"
   png 1920 1080 > "$tmp/tvhome-test.png"
   sh wallpaper.sh "$TV" "$tmp/tvhome-test.png" >/dev/null || fail "wallpaper.sh failed"
   home
@@ -142,15 +158,27 @@ t_hdmi() {
 # listener, so the home heals both when it starts. This fakes that state without restarting the TV.
 t_boot() {
   sh extras.sh "$TV" >/dev/null || fail "extras.sh failed"
-  sh_tv settings put secure enabled_accessibility_services null
+  sh_tv "settings put secure $A11Y '$OTHER'"
   sh_tv settings put secure accessibility_enabled 0
   sh_tv am force-stop $ME
   home; sleep 3
   sh_tv settings get secure enabled_accessibility_services | grep -q "$ME/.KeyService" || fail "home didn't re-enable KeyService"
   sh_tv dumpsys accessibility | grep "Bound services" | grep -q "label=Home" || fail "KeyService not bound after healing"
   bell | grep -q 'Notifications' || fail "bell missing after a restart of the home"
+  a11y | tr ':' '\n' | grep -qxF "$OTHER" || fail "healing dropped another service: $(a11y)"
 }
 
+# Right after a real restart: the remap service and the bell must be back on their own.
+t_postboot() {
+  a11y | grep -q "com.ansub.tvhome/" || fail "KeyService not enabled after the restart: $(a11y)"
+  sh_tv dumpsys accessibility | grep "Bound services" | grep -q "label=Home" || fail "KeyService not bound after the restart"
+  home
+  bell | grep -q 'Notifications' || fail "bell missing after the restart"
+}
+if [ "$ONLY" = postboot ]; then echo "== postboot"; t_postboot; echo PASS; exit 0; fi
+
+saved=$(a11y)
+trap 'sh_tv "settings put secure $A11Y '"'"'$saved'"'"'" >/dev/null 2>&1' EXIT
 sh_tv logcat -b crash -c
 for t in baseline keys wallpaper ambient bell hdmi boot; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue

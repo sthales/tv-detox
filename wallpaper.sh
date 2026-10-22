@@ -5,6 +5,10 @@
 set -e
 TARGET="$1"; IMG="$2"
 [ -n "$TARGET" ] && [ -f "$IMG" ] || { echo "Usage: sh wallpaper.sh <TV_IP> <image file>" >&2; exit 1; }
+case "$(printf '%s' "$IMG" | tr 'A-Z' 'a-z')" in
+  *.jpg|*.jpeg|*.png|*.webp) ;;
+  *) echo "Use a JPG, PNG or WebP picture; the home can't show $(basename "$IMG")." >&2; exit 1 ;;
+esac
 case "$TARGET" in
   *.*.*.*:*) TV=$TARGET ;;
   *.*.*.*)   TV=$TARGET:5555 ;;
