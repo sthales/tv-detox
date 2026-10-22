@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="key_service">Opens an app when a remote button is pressed.</string>
+</resources>

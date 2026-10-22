@@ -30,6 +30,20 @@ t_baseline() {
   ui | grep -qE 'text="[0-9]{1,2}:[0-9]{2}"' || fail "no clock"
 }
 
+# Keys sent with "input keyevent" skip the accessibility filter, so only a real remote press proves
+# the remap. This checks the part a script can see: the service is on, bound and filtering keys.
+t_keys() {
+  sh extras.sh "$TV" >/dev/null || fail "extras.sh failed"
+  sh_tv settings get secure enabled_accessibility_services | grep -q "$ME/.KeyService" || fail "KeyService not enabled"
+  sleep 2
+  bound=$(sh_tv dumpsys accessibility | grep "Bound services")
+  echo "$bound" | grep -q "label=Home" || fail "KeyService not bound"
+  echo "$bound" | grep -q "capabilities=8" || fail "KeyService can't filter keys"
+  sh extras.sh "$TV" "4021:com.not.installed" >/dev/null
+  home
+  sh extras.sh "$TV" >/dev/null
+}
+
 sh_tv logcat -b crash -c
 for t in baseline keys wallpaper ambient bell hdmi; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
