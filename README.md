@@ -470,6 +470,24 @@ It's one screen of plain Java, no libraries, no Gradle. The background is drawn 
 
 </details>
 
+## Fork additions
+
+This fork adds a few things on top of the home screen. Run `extras.sh` once after every install.
+
+```sh
+sh extras.sh <TV_IP>                       # remote buttons + notification bell
+sh extras.sh <TV_IP> "4020:com.stremio.one" # your own key code:package list
+sh wallpaper.sh <TV_IP> my-art.jpg         # a picture as the wallpaper
+```
+
+- **Remote buttons that open apps.** By default the TCL button opens Stremio, and Netflix, Prime Video and YouTube work again with Google TV's home turned off (Google TV's home used to launch those three). Uses an accessibility service, so only the listed keys are touched.
+- **Picture wallpapers.** Pictures pushed with `wallpaper.sh` show up in Settings > Wallpaper after the gradients, with a dark fade so the clock and labels stay readable.
+- **Ambient view.** Back on the home hides the apps and leaves the wallpaper and a small clock. Any button brings them back.
+- **Notification bell.** Next to the network icon, with a dot for new notifications. OK opens the list; pick one to open it, or Clear all.
+- **Hide HDMI tiles.** Hold OK on an HDMI tile and pick Hide. Settings > Show hidden inputs brings them back.
+
+Checks: `sh ci/unit-test.sh` and `sh ci/extras-test.sh <TV_IP>`. Unlike `ci/smoke-test.sh`, these never run `undo.sh`, so they are safe on a real TV.
+
 ## Contributing
 
 Pull requests are welcome for fixes that keep working on every TV. This project sticks to official apps and Android's own settings, so changes that add ad blockers or unofficial apps won't be merged. If you want those, fork it and make it yours.

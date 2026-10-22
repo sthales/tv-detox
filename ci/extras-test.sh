@@ -55,6 +55,7 @@ sys.stdout.buffer.write(b"\x89PNG\r\n\x1a\n"+c(b"IHDR",struct.pack(">IIBBBBB",w,
 shown() { ui | grep -o 'content-desc="wallpaper:[^"]*"' | head -1; }
 
 t_wallpaper() {
+  home; was=$(shown | sed 's/.*wallpaper:\([^"]*\)"/\1/'); was=${was:-Dusk}
   tmp=$(mktemp -d)
   png 1920 1080 > "$tmp/tvhome-test.png"
   sh wallpaper.sh "$TV" "$tmp/tvhome-test.png" >/dev/null || fail "wallpaper.sh failed"
@@ -74,7 +75,7 @@ t_wallpaper() {
   [ $((big - base)) -lt 20000 ] || fail "a 6000x4000 image adds $((big - base)) KB over the gradient"
   echo "   6000x4000 image: $big KB vs gradient $base KB"
   sh_tv rm -f /sdcard/Pictures/tvhome/tvhome-big.png
-  sh_tv am start -n $ME/.MainActivity --es wallpaper Dusk --es stamp "w$(date +%s)" >/dev/null
+  sh_tv am start -n $ME/.MainActivity --es wallpaper "\"$was\"" --es stamp "w$(date +%s)" >/dev/null
   rm -rf "$tmp"
 }
 
