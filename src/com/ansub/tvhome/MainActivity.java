@@ -151,6 +151,11 @@ public class MainActivity extends Activity {
     // Back on the home hides the page and leaves the wallpaper and a small clock; any key brings it back.
     private boolean ambient;
     private Showcase showcase; // the screensaver view, while Back has it up
+    private LinearLayout npBox;
+    private ImageView npArt;
+    private TextView npText;
+    private LineIcon npState;
+    private final Runnable npRefresh = this::refreshNowPlaying;
     private FrameLayout root; // the page, inside a vertical scroller
     private int tileW, tileH, gridTop, bottomRowTop; // app grid geometry, set by buildTiles
     private final List<View> tiles = new ArrayList<>();
@@ -345,6 +350,8 @@ public class MainActivity extends Activity {
         }
         healServices();
         applySaver(this);
+        NowPlaying.listen(this, npRefresh);
+        refreshNowPlaying();
         rotateIfDue();
         OnlinePictures.refresh(this);
         View f = getCurrentFocus();
@@ -360,20 +367,40 @@ public class MainActivity extends Activity {
                     new android.content.ComponentName(this, NotifService.class));
         } catch (Exception ignored) {}
         String keys = getSharedPreferences(PREFS, 0).getString("keys", null);
-        if (KeyService.live != null || keys == null || keys.trim().isEmpty()) return;
-        android.content.ComponentName me = new android.content.ComponentName(this, KeyService.class);
-        android.content.ContentResolver cr = getContentResolver();
-        String name = Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES;
+        if (keys == null || keys.trim().isEmpty()) return;
+        long updated = 0;
+        try { updated = getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime; } catch (Exception ignored) {}
+        SharedPreferences heal = getSharedPreferences("heal", 0);
+        boolean fresh = heal.getLong("keys_rebound_for", 0) != updated;
+        if (KeyService.live != null && !fresh) return;
+        heal.edit().putLong("keys_rebound_for", updated).apply();
+        rebindKeys();
+    }
+
+    private boolean rebinding;
+
+    private void rebindKeys() {
+        if (rebinding) return;
+        final android.content.ComponentName me = new android.content.ComponentName(this, KeyService.class);
+        final android.content.ContentResolver cr = getContentResolver();
+        final String name = Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES;
         try {
-            StringBuilder others = new StringBuilder();
+            StringBuilder b = new StringBuilder();
             String on = Settings.Secure.getString(cr, name);
             if (on != null) for (String s : on.split(":")) {
                 android.content.ComponentName c = android.content.ComponentName.unflattenFromString(s);
-                if (c != null && !c.equals(me)) others.append(others.length() == 0 ? "" : ":").append(s);
+                if (c != null && !c.equals(me)) b.append(b.length() == 0 ? "" : ":").append(s);
             }
-            Settings.Secure.putString(cr, name, others.length() == 0 ? null : others.toString());
-            Settings.Secure.putString(cr, name, (others.length() == 0 ? "" : others + ":") + me.flattenToShortString());
-            Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 1);
+            final String others = b.toString();
+            Settings.Secure.putString(cr, name, others.isEmpty() ? null : others);
+            rebinding = true;
+            ui.postDelayed(() -> {
+                rebinding = false;
+                try {
+                    Settings.Secure.putString(cr, name, (others.isEmpty() ? "" : others + ":") + me.flattenToShortString());
+                    Settings.Secure.putInt(cr, Settings.Secure.ACCESSIBILITY_ENABLED, 1);
+                } catch (SecurityException ignored) {}
+            }, 1500);
         } catch (SecurityException ignored) {}
     }
 
@@ -421,6 +448,7 @@ public class MainActivity extends Activity {
         super.onPause();
         ui.removeCallbacks(rotateTick);
         showAmbient(false);
+        NowPlaying.unlisten(this, npRefresh);
     }
 
     private void showAmbient(boolean on) {
@@ -431,6 +459,7 @@ public class MainActivity extends Activity {
             showcase = new Showcase(this, slideSource(this), regular, semibold);
             addContentView(showcase, new FrameLayout.LayoutParams(-1, -1));
             showcase.start();
+            refreshNowPlaying();
         } else if (showcase != null) {
             showcase.stop();
             ((ViewGroup) showcase.getParent()).removeView(showcase);
@@ -1400,6 +1429,25 @@ public class MainActivity extends Activity {
         bg.setColor(0x24FFFFFF);
         bg.setStroke(Math.max(1, px(2)), 0x30FFFFFF);
         chip.setBackground(bg);
+        npBox = new LinearLayout(this);
+        npBox.setGravity(Gravity.CENTER_VERTICAL);
+        npBox.setContentDescription("nowplaying");
+        npBox.setVisibility(View.GONE);
+        npArt = new ImageView(this);
+        npBox.addView(npArt, new LinearLayout.LayoutParams(px(44), px(44)));
+        npText = text(px(22), 0xE6FFFFFF, regular);
+        npText.setSingleLine(true);
+        npText.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        npText.setMaxWidth(px(360));
+        npText.setPadding(px(14), 0, px(10), 0);
+        npBox.addView(npText);
+        npState = new LineIcon(LineIcon.PLAY);
+        ImageView st = new ImageView(this);
+        st.setImageDrawable(npState);
+        LinearLayout.LayoutParams sp = new LinearLayout.LayoutParams(px(24), px(24));
+        sp.rightMargin = px(20);
+        npBox.addView(st, sp);
+        chip.addView(npBox);
         TextClock time = clock("h:mm", "H:mm", px(32), Color.WHITE, semibold);
         time.setFontFeatureSettings("tnum");
         LinearLayout.LayoutParams tp = new LinearLayout.LayoutParams(-2, -2);
@@ -1427,6 +1475,36 @@ public class MainActivity extends Activity {
         lp.rightMargin = px(MARGIN);
         root.addView(wrap, lp);
         tiles.add(chip);
+        refreshNowPlaying();
+    }
+
+    private void refreshNowPlaying() {
+        android.media.session.MediaController m = NowPlaying.current(this);
+        Bitmap art = m == null ? null : NowPlaying.art(m);
+        if (npBox != null) {
+            npBox.setVisibility(m == null ? View.GONE : View.VISIBLE);
+            if (m != null) {
+                npText.setText(NowPlaying.line(m));
+                npArt.setImageDrawable(art == null ? new LineIcon(LineIcon.SOUND) : rounded(art, px(44), px(10)));
+                npState.setOps(NowPlaying.playing(m) ? LineIcon.PLAY : LineIcon.PAUSE);
+            }
+        }
+        if (showcase != null)
+            showcase.setNowPlaying(m == null ? null : NowPlaying.line(m), art == null ? null : rounded(art, px(40), px(8)));
+    }
+
+    private Drawable rounded(Bitmap b, int size, int radius) {
+        Bitmap out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888);
+        android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG | android.graphics.Paint.FILTER_BITMAP_FLAG);
+        android.graphics.BitmapShader sh = new android.graphics.BitmapShader(b, android.graphics.Shader.TileMode.CLAMP, android.graphics.Shader.TileMode.CLAMP);
+        float s = Math.max((float) size / b.getWidth(), (float) size / b.getHeight());
+        android.graphics.Matrix mx = new android.graphics.Matrix();
+        mx.setScale(s, s);
+        mx.postTranslate((size - b.getWidth() * s) / 2, (size - b.getHeight() * s) / 2);
+        sh.setLocalMatrix(mx);
+        p.setShader(sh);
+        new Canvas(out).drawRoundRect(0, 0, size, size, radius, radius, p);
+        return new BitmapDrawable(getResources(), out);
     }
 
     // The owner's picture in a circle (files/avatar.png or .jpg, from avatar.sh), else their initial
@@ -1510,6 +1588,7 @@ public class MainActivity extends Activity {
         time.setFontFeatureSettings("tnum");
         head.addView(time);
         box.addView(head);
+        final View playPause = nowPlayingCard(box, d);
 
         TextView label = text(px(18), 0x99FFFFFF, semibold);
         label.setText(Strings.t("Controls").toUpperCase(java.util.Locale.getDefault()));
@@ -1597,7 +1676,87 @@ public class MainActivity extends Activity {
         win.setAttributes(lp);
         win.setDimAmount(0.3f);
         d.show();
-        if (first != null) first.requestFocus();
+        if (playPause != null) playPause.requestFocus();
+        else if (first != null) first.requestFocus();
+    }
+
+    private View nowPlayingCard(LinearLayout box, Dialog d) {
+        if (NowPlaying.current(this) == null) return null;
+        final LinearLayout card = new LinearLayout(this);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setContentDescription("nowplaying-card");
+        card.setPadding(px(18), px(18), px(18), px(18));
+        card.setClipChildren(false);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(px(24));
+        bg.setColor(0x1FFFFFFF);
+        card.setBackground(bg);
+        final ImageView art = new ImageView(this);
+        card.addView(art, new LinearLayout.LayoutParams(px(88), px(88)));
+        LinearLayout words = new LinearLayout(this);
+        words.setOrientation(LinearLayout.VERTICAL);
+        words.setPadding(px(18), 0, px(12), 0);
+        final TextView title = text(px(24), Color.WHITE, semibold);
+        final TextView artist = text(px(20), 0xB3FFFFFF, regular);
+        for (TextView t : new TextView[] {title, artist}) {
+            t.setSingleLine(true);
+            t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            words.addView(t);
+        }
+        card.addView(words, new LinearLayout.LayoutParams(0, -2, 1f));
+        final LineIcon state = new LineIcon(LineIcon.PAUSE);
+        View prev = mediaButton(new LineIcon(LineIcon.PREVIOUS), "previous",
+                () -> { android.media.session.MediaController m = NowPlaying.current(this); if (m != null) m.getTransportControls().skipToPrevious(); });
+        View pp = mediaButton(state, "playpause", () -> NowPlaying.playPause(NowPlaying.current(this)));
+        View next = mediaButton(new LineIcon(LineIcon.NEXT), "next",
+                () -> { android.media.session.MediaController m = NowPlaying.current(this); if (m != null) m.getTransportControls().skipToNext(); });
+        for (View b : new View[] {prev, pp, next}) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(px(60), px(60));
+            lp.leftMargin = px(8);
+            card.addView(b, lp);
+        }
+        LinearLayout.LayoutParams cp = new LinearLayout.LayoutParams(-1, -2);
+        cp.topMargin = px(24);
+        box.addView(card, cp);
+        final Runnable update = () -> {
+            android.media.session.MediaController m = NowPlaying.current(this);
+            card.setVisibility(m == null ? View.GONE : View.VISIBLE);
+            if (m == null) return;
+            Bitmap a = NowPlaying.art(m);
+            art.setImageDrawable(a == null ? new LineIcon(LineIcon.SOUND) : rounded(a, px(88), px(14)));
+            title.setText(NowPlaying.title(m));
+            String who = NowPlaying.artist(m);
+            artist.setText(who == null ? "" : who);
+            artist.setVisibility(who == null ? View.GONE : View.VISIBLE);
+            state.setOps(NowPlaying.playing(m) ? LineIcon.PAUSE : LineIcon.PLAY);
+        };
+        update.run();
+        NowPlaying.listen(this, update);
+        d.getWindow().getDecorView().addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override public void onViewAttachedToWindow(View v) {}
+            @Override public void onViewDetachedFromWindow(View v) { NowPlaying.unlisten(MainActivity.this, update); }
+        });
+        return pp;
+    }
+
+    private View mediaButton(final LineIcon icon, String desc, final Runnable action) {
+        FrameLayout b = new FrameLayout(this);
+        b.setContentDescription(desc);
+        final GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.OVAL);
+        bg.setColor(0x24FFFFFF);
+        b.setBackground(bg);
+        ImageView iv = new ImageView(this);
+        iv.setImageDrawable(icon);
+        b.addView(iv, new FrameLayout.LayoutParams(px(28), px(28), Gravity.CENTER));
+        b.setFocusable(true);
+        b.setOnFocusChangeListener((v, has) -> {
+            bg.setColor(has ? 0xF2FFFFFF : 0x24FFFFFF);
+            icon.setColorFilter(has ? new android.graphics.PorterDuffColorFilter(0xFF1C1820, android.graphics.PorterDuff.Mode.SRC_IN) : null);
+            v.animate().scaleX(has ? 1.1f : 1f).scaleY(has ? 1.1f : 1f).setDuration(120).start();
+        });
+        b.setOnClickListener(v -> action.run());
+        return b;
     }
 
     // One square control: icon over label, on glass; focused it turns white with dark content, like tvOS.

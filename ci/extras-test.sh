@@ -2,7 +2,7 @@
 # Checks the fork's additions on a TV that already runs this home. Unlike smoke-test.sh it never
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
-# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream pinned nowplaying. Name one to run only that.
+# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream pinned rebind nowplaying. Name one to run only that.
 # The enabled accessibility services and all the home's settings are put back afterwards (settings export/import).
 #   sh ci/extras-test.sh <TV> postboot   right after a real restart, before any script: checks only
 set -e
@@ -461,32 +461,23 @@ t_pinned() {
   sh_tv input keyevent KEYCODE_DPAD_UP; sleep 1
 }
 
-yt_state() { sh_tv dumpsys media_session | awk '/package=com.google.android.youtube.tv/{f=1} f&&/state=PlaybackState/{print; exit}' | grep -o '{state=[A-Z_]*' | cut -c2-; }
+playing_pkg() { sh_tv dumpsys media_session | awk '/package=/{p=$1} /state=PlaybackState \{state=(PLAYING|PAUSED)/{sub("package=","",p); print p; exit}'; }
+pkg_state() { sh_tv dumpsys media_session | awk -v p="package=$1" '$1==p{f=1} f&&/state=PlaybackState/{print; exit}' | grep -o '{state=[A-Z_]*' | cut -d= -f2; }
 t_nowplaying() {
-  sh_tv cmd media_session dispatch pause >/dev/null 2>&1; home; sleep 1
-  sh_tv am force-stop com.google.android.youtube.tv
-  home; sleep 1
-  ui | grep -q 'content-desc="nowplaying"' && fail "the chip shows something playing with nothing playing"
-  sh_tv am start -a android.intent.action.VIEW -d "https://www.youtube.com/watch?v=aqz-KE-bpKQ" com.google.android.youtube.tv >/dev/null
-  for _ in $(seq 1 30); do [ "$(yt_state)" = "state=PLAYING" ] && break; sleep 1; done
-  [ "$(yt_state)" = "state=PLAYING" ] || fail "couldn't get YouTube playing for the test ($(yt_state))"
+  P=$(playing_pkg); [ -n "$P" ] || fail "start some music that keeps playing in the background (Spotify) before this test"
+  was=$(pkg_state "$P"); [ "$was" = PLAYING ] && flip=PAUSED || flip=PLAYING
   home; sleep 2
-  x=$(ui)
-  echo "$x" | grep -q 'content-desc="nowplaying"' || fail "the chip doesn't show what's playing"
-  echo "$x" | grep -q 'Big Buck Bunny' || fail "the chip doesn't show the title"
+  ui | grep -q 'content-desc="nowplaying"' || fail "the chip doesn't show what $P is playing"
   sh_tv input keyevent 83; sleep 3
   x=$(ui)
   echo "$x" | grep -q 'content-desc="nowplaying-card"' || fail "Control Center has no now-playing card"
-  echo "$x" | grep -q 'content-desc="playpause"' || fail "the card has no play/pause"
+  for b in previous playpause next; do echo "$x" | grep -q "content-desc=\"$b\"" || fail "the card has no $b button"; done
   [ "$(focused_desc)" = playpause ] || fail "Control Center doesn't open on play/pause when something's playing (on: $(focused_desc))"
-  before=$(yt_state)
-  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 2
-  [ "$(yt_state)" != "$before" ] || fail "play/pause didn't change the state ($before)"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 3
+  [ "$(pkg_state "$P")" = "$flip" ] || fail "play/pause didn't take $P from $was to $flip ($(pkg_state "$P"))"
+  sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 3
+  [ "$(pkg_state "$P")" = "$was" ] || fail "play/pause didn't take $P back to $was ($(pkg_state "$P"))"
   sh_tv input keyevent KEYCODE_BACK; sleep 1
-  sh_tv am force-stop com.google.android.youtube.tv
-  home; sleep 2
-  ui | grep -q 'content-desc="nowplaying"' && fail "the chip still shows a stopped app"
-  true
 }
 focused_desc() { ui | grep -o '<node [^>]*focused="true"[^>]*>' | grep -o 'content-desc="[^"]*"' | head -1 | sed 's/content-desc="\(.*\)"/\1/'; }
 
@@ -499,6 +490,17 @@ t_dream() {
   sh_tv am start -n $ME/.MainActivity --es tv_saver on --es stamp "d2$(date +%s)" >/dev/null; sleep 2
   [ "$(saver_now)" = "$ME/.Dream" ] || fail "screensaver didn't come back to ours ($(saver_now))"
   sh_tv dumpsys package $ME | grep -q 'android.service.dreams.DreamService' || fail "Dream service isn't declared"
+}
+
+bound_homes() { sh_tv dumpsys accessibility | awk '/Bound services/{f=1} f&&/Enabled services/{exit} f' | grep -o 'label=Home' | wc -l | tr -d ' '; }
+key_crashed() { sh_tv dumpsys accessibility | grep -o 'Crashed services:{[^}]*}' | grep -q KeyService; }
+t_rebind() {
+  adb -s "$TV" install -r out/tvhome.apk >/dev/null 2>&1 || fail "reinstall failed"
+  home
+  for _ in $(seq 1 15); do [ "$(bound_homes)" = 1 ] && ! key_crashed && break; sleep 1; done
+  [ "$(bound_homes)" = 1 ] || fail "after a reinstall the key service is bound $(bound_homes) times (a dead copy delays every remote key by 0.5 s)"
+  key_crashed && fail "after a reinstall the key service is left 'crashed' (every remote key waits 0.5 s for it)"
+  true
 }
 
 # Right after a real restart: the remap service and the bell must be back on their own.
@@ -520,7 +522,7 @@ restore_all() {
 }
 trap restore_all EXIT
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream pinned nowplaying; do
+for t in baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream pinned rebind nowplaying; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"

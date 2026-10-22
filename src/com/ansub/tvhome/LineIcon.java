@@ -13,6 +13,9 @@ import android.graphics.drawable.Drawable;
 // 4=arc cx cy r startDegrees sweepDegrees (0 degrees is 3 o'clock, going clockwise).
 final class LineIcon extends Drawable {
     static final int[] PLAY = {0, 60, 45, 1, 60, 195, 1, 190, 120, 2};
+    static final int[] PAUSE = {0, 85, 55, 1, 85, 185, 0, 155, 55, 1, 155, 185};
+    static final int[] NEXT = {0, 55, 55, 1, 55, 185, 1, 150, 120, 2, 0, 185, 55, 1, 185, 185};
+    static final int[] PREVIOUS = {0, 185, 55, 1, 185, 185, 1, 90, 120, 2, 0, 55, 55, 1, 55, 185};
     static final int[] HDMI = {0, 30, 90, 1, 210, 90, 1, 210, 130, 1, 185, 160, 1, 55, 160, 1, 30, 130, 2,
             0, 80, 120, 1, 160, 120};
     static final int[] SETTINGS = {0, 40, 70, 1, 140, 70, 0, 180, 70, 1, 200, 70, 0, 40, 170, 1, 60, 170,
@@ -41,7 +44,7 @@ final class LineIcon extends Drawable {
     static final int[] PICTURE ={0, 30, 50, 1, 210, 50, 1, 210, 165, 1, 30, 165, 2, 0, 120, 165, 1, 120, 200,
             0, 80, 200, 1, 160, 200};
 
-    private final int[] ops;
+    private int[] ops;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Path path = new Path();
     private final RectF arc = new RectF();
@@ -80,6 +83,11 @@ final class LineIcon extends Drawable {
     }
 
     // Both redraw: a focused Control Center tile turns its icon dark, and back to white when it leaves.
+    void setOps(int[] ops) {
+        this.ops = ops;
+        invalidateSelf();
+    }
+
     @Override public void setAlpha(int a) { paint.setAlpha(a); invalidateSelf(); }
     @Override public void setColorFilter(ColorFilter cf) { paint.setColorFilter(cf); invalidateSelf(); }
     @Override public int getOpacity() { return PixelFormat.TRANSLUCENT; }

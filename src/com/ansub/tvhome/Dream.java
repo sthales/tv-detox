@@ -5,6 +5,7 @@ import android.view.KeyEvent;
 
 public class Dream extends DreamService {
     private Showcase show;
+    private final Runnable playing = this::refresh;
 
     @Override
     public void onAttachedToWindow() {
@@ -21,10 +22,18 @@ public class Dream extends DreamService {
         super.onDreamingStarted();
         OnlinePictures.refresh(this);
         show.start();
+        NowPlaying.listen(this, playing);
+        refresh();
+    }
+
+    private void refresh() {
+        android.media.session.MediaController m = NowPlaying.current(this);
+        show.setNowPlaying(m == null ? null : NowPlaying.line(m), null);
     }
 
     @Override
     public void onDreamingStopped() {
+        NowPlaying.unlisten(this, playing);
         show.stop();
         super.onDreamingStopped();
     }
