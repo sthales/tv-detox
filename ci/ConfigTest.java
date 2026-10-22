@@ -5,6 +5,7 @@ import java.util.Map;
 public class ConfigTest {
     public static void main(String[] args) {
         parseKeysReadsCodeToPackage();
+        isImageAcceptsPictureFilesOnly();
         System.out.println("OK");
     }
 
@@ -15,5 +16,14 @@ public class ConfigTest {
         assert Config.parseKeys("x:a,4020:,:b,4020").isEmpty();
         assert Config.parseKeys(null).isEmpty();
         assert Config.parseKeys("").isEmpty();
+    }
+
+    static void isImageAcceptsPictureFilesOnly() {
+        assert Config.isImage("a.JPG");
+        assert Config.isImage("b.webp");
+        assert Config.isImage("c.jpeg") && Config.isImage("d.png");
+        assert !Config.isImage("c.gif");
+        assert !Config.isImage(".jpg.txt");
+        assert !Config.isImage(null);
     }
 }

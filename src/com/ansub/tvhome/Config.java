@@ -21,4 +21,11 @@ final class Config {
         }
         return out;
     }
+
+    // Wallpaper images: the picture formats Android decodes everywhere.
+    static boolean isImage(String name) {
+        if (name == null) return false;
+        String n = name.toLowerCase(java.util.Locale.ROOT);
+        return n.endsWith(".jpg") || n.endsWith(".jpeg") || n.endsWith(".png") || n.endsWith(".webp");
+    }
 }

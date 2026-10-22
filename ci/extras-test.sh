@@ -44,6 +44,40 @@ t_keys() {
   sh extras.sh "$TV" >/dev/null
 }
 
+# A solid colour PNG of w x h, made with python3 so the test needs no image tools.
+png() {
+  python3 -c 'import sys,zlib,struct
+w,h=int(sys.argv[1]),int(sys.argv[2])
+c=lambda t,d:struct.pack(">I",len(d))+t+d+struct.pack(">I",zlib.crc32(t+d))
+raw=b"".join(b"\0"+b"\xff\x00\xff"*w for _ in range(h))
+sys.stdout.buffer.write(b"\x89PNG\r\n\x1a\n"+c(b"IHDR",struct.pack(">IIBBBBB",w,h,8,2,0,0,0))+c(b"IDAT",zlib.compress(raw))+c(b"IEND",b""))' "$1" "$2"
+}
+shown() { ui | grep -o 'content-desc="wallpaper:[^"]*"' | head -1; }
+
+t_wallpaper() {
+  tmp=$(mktemp -d)
+  png 1920 1080 > "$tmp/tvhome-test.png"
+  sh wallpaper.sh "$TV" "$tmp/tvhome-test.png" >/dev/null || fail "wallpaper.sh failed"
+  home
+  shown | grep -q 'wallpaper:image:tvhome-test.png' || fail "image wallpaper not shown: $(shown)"
+  sh_tv rm -f /sdcard/Pictures/tvhome/tvhome-test.png
+  sh_tv am force-stop $ME; home
+  shown | grep -q 'wallpaper:Dusk' || fail "missing image didn't fall back to Dusk: $(shown)"
+  # The home's own PSS includes about 55 MB of 1080p GPU buffers whatever the wallpaper, so compare
+  # a big picture with the gradient instead of using a fixed number.
+  pss() { sh_tv am force-stop $ME; home; sleep 3; sh_tv dumpsys meminfo $ME | awk '/TOTAL PSS:/{print $3; exit}'; }
+  base=$(pss)
+  png 6000 4000 > "$tmp/tvhome-big.png"
+  sh wallpaper.sh "$TV" "$tmp/tvhome-big.png" >/dev/null
+  big=$(pss)
+  shown | grep -q 'wallpaper:image:tvhome-big.png' || fail "big image not shown: $(shown)"
+  [ $((big - base)) -lt 20000 ] || fail "a 6000x4000 image adds $((big - base)) KB over the gradient"
+  echo "   6000x4000 image: $big KB vs gradient $base KB"
+  sh_tv rm -f /sdcard/Pictures/tvhome/tvhome-big.png
+  sh_tv am start -n $ME/.MainActivity --es wallpaper Dusk --es stamp "w$(date +%s)" >/dev/null
+  rm -rf "$tmp"
+}
+
 sh_tv logcat -b crash -c
 for t in baseline keys wallpaper ambient bell hdmi; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue

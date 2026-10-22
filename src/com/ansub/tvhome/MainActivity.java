@@ -11,6 +11,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -102,6 +103,8 @@ public class MainActivity extends Activity {
     // the bottom right. Dark ones first, then bright ones that get darker towards the bottom, so the
     // white labels stay easy to read. Only colours, no images, so every one costs the same as Dusk,
     // the default.
+    // Wallpaper images, pushed by wallpaper.sh. The saved wallpaper is IMAGE + file name.
+    private static final String IMAGES = "/sdcard/Pictures/tvhome", IMAGE = "image:";
     private static final String[] WALLPAPER_NAMES = {"Dusk", "Midnight", "Plum", "Forest", "Graphite", "Ocean", "Ember",
             "Sunset", "Lagoon", "Aurora", "Coral", "Iris", "Meadow", "Gold"};
     private static final int[][] WALLPAPERS = {
@@ -124,6 +127,7 @@ public class MainActivity extends Activity {
 
     private static Typeface regular, semibold;
 
+    private ScrollView scroller;
     private FrameLayout root; // the page, inside a vertical scroller
     private int tileW, tileH, gridTop; // app grid geometry, set by buildTiles
     private final List<View> tiles = new ArrayList<>();
@@ -166,9 +170,8 @@ public class MainActivity extends Activity {
         saveConfig(getIntent());
         loadFonts();
         scale = getResources().getDisplayMetrics().widthPixels / 1920f;
-        showWallpaper(wallpaper());
 
-        ScrollView scroller = new ScrollView(this);
+        scroller = new ScrollView(this);
         scroller.setFillViewport(true);
         scroller.setVerticalScrollBarEnabled(false);
         scroller.setOverScrollMode(View.OVER_SCROLL_NEVER);
@@ -176,6 +179,7 @@ public class MainActivity extends Activity {
         root = new FrameLayout(this);
         root.setClipChildren(false);
         scroller.addView(root, new FrameLayout.LayoutParams(-1, -2));
+        showWallpaper(wallpaper());
 
         LinearLayout clock = new LinearLayout(this);
         clock.setOrientation(LinearLayout.VERTICAL);
@@ -228,7 +232,10 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        if (saveConfig(intent)) buildTiles();
+        if (saveConfig(intent)) {
+            showWallpaper(wallpaper());
+            buildTiles();
+        }
     }
 
     // Saves an app list passed with --es apps "..." and shortcuts passed with --es quick "...".
@@ -239,7 +246,8 @@ public class MainActivity extends Activity {
         String apps = intent == null ? null : intent.getStringExtra("apps");
         String quick = intent == null ? null : intent.getStringExtra("quick");
         String keys = intent == null ? null : intent.getStringExtra("keys");
-        if (apps == null && quick == null && keys == null) return false;
+        String wall = intent == null ? null : intent.getStringExtra("wallpaper");
+        if (apps == null && quick == null && keys == null && wall == null) return false;
         SharedPreferences prefs = getSharedPreferences(PREFS, 0);
         String stamp = intent.getStringExtra("stamp");
         if (stamp != null && stamp.equals(prefs.getString("stamp", null))) return false;
@@ -256,6 +264,7 @@ public class MainActivity extends Activity {
             else e.putString("quick", quick);
         }
         if (keys != null) e.putString("keys", keys.trim());
+        if (wall != null) e.putString("wallpaper", wall.trim());
         e.apply();
         dirty = true;
         return true;
@@ -331,21 +340,86 @@ public class MainActivity extends Activity {
         return new LayerDrawable(new Drawable[] {base, top, bottom});
     }
 
-    // The saved wallpaper, as an index into WALLPAPERS (Dusk if none is saved).
-    private int wallpaper() {
-        String saved = getSharedPreferences(PREFS, 0).getString("wallpaper", null);
-        return Math.max(0, Arrays.asList(WALLPAPER_NAMES).indexOf(saved));
+    // The saved wallpaper: a gradient's name, or "image:" and a file in IMAGES. Dusk if none is saved.
+    private String wallpaper() {
+        return getSharedPreferences(PREFS, 0).getString("wallpaper", WALLPAPER_NAMES[0]);
     }
 
-    private void showWallpaper(int i) {
-        getWindow().setBackgroundDrawable(background(WALLPAPERS[i]));
+    // Shows a wallpaper by name. An image that can't be read falls back to Dusk.
+    private void showWallpaper(String name) {
+        Drawable d = null;
+        if (name.startsWith(IMAGE)) {
+            d = imageWallpaper(new File(IMAGES, name.substring(IMAGE.length())));
+            if (d == null) name = WALLPAPER_NAMES[0];
+        }
+        if (d == null) d = background(WALLPAPERS[Math.max(0, Arrays.asList(WALLPAPER_NAMES).indexOf(name))]);
+        getWindow().setBackgroundDrawable(d);
+        if (scroller != null) scroller.setContentDescription("wallpaper:" + name);
     }
 
-    // The wallpapers, each with a small dot of its colours. Moving through the list shows each one
-    // behind the panel; OK keeps it, Back goes back to the one before.
+    // Gradients first, then the images in IMAGES by name.
+    private List<String> wallpapers() {
+        List<String> out = new ArrayList<>(Arrays.asList(WALLPAPER_NAMES));
+        String[] files = new File(IMAGES).list();
+        if (files != null) {
+            Arrays.sort(files, String.CASE_INSENSITIVE_ORDER);
+            for (String f : files) if (Config.isImage(f)) out.add(IMAGE + f);
+        }
+        return out;
+    }
+
+    // An image cropped to the screen, decoded once at about screen size, with a dark fade behind the
+    // clock and the apps so white text stays readable on any picture.
+    private Drawable imageWallpaper(File f) {
+        int w = getResources().getDisplayMetrics().widthPixels, h = getResources().getDisplayMetrics().heightPixels;
+        Bitmap b = crop(f, w, h);
+        if (b == null) return null;
+        GradientDrawable clock = radial(0x8C000000, 0f, 0f, px(1100));
+        GradientDrawable apps = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[] {Color.TRANSPARENT, Color.TRANSPARENT, 0x99000000});
+        return new LayerDrawable(new Drawable[] {new BitmapDrawable(getResources(), b), clock, apps});
+    }
+
+    // Decodes f center-cropped to w x h. Big pictures are sampled down while decoding, so a photo
+    // from a phone never needs more memory than about one screen.
+    private static Bitmap crop(File f, int w, int h) {
+        try {
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(f.getPath(), o);
+            if (o.outWidth <= 0 || o.outHeight <= 0) return null;
+            o.inSampleSize = 1;
+            while (o.outWidth / (o.inSampleSize * 2) >= w && o.outHeight / (o.inSampleSize * 2) >= h) o.inSampleSize *= 2;
+            o.inJustDecodeBounds = false;
+            Bitmap src = BitmapFactory.decodeFile(f.getPath(), o);
+            if (src == null) return null;
+            float s = Math.max((float) w / src.getWidth(), (float) h / src.getHeight());
+            Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(out);
+            c.translate((w - src.getWidth() * s) / 2, (h - src.getHeight() * s) / 2);
+            c.scale(s, s);
+            c.drawBitmap(src, 0, 0, new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG));
+            src.recycle();
+            return out;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    // The wallpapers, each with a small dot of its colours or of the picture. Moving through the list
+    // shows each one behind the panel; OK keeps it, Back goes back to the one before.
     private void showWallpapers() {
         final int size = px(40);
-        panel(Strings.t("Wallpaper"), Arrays.asList(WALLPAPER_NAMES), pos -> {
+        final List<String> names = wallpapers();
+        List<String> labels = new ArrayList<>();
+        for (String n : names) labels.add(n.startsWith(IMAGE) ? n.substring(IMAGE.length()) : n);
+        panel(Strings.t("Wallpaper"), labels, pos -> {
+            String n = names.get(pos);
+            if (n.startsWith(IMAGE)) {
+                Bitmap b = crop(new File(IMAGES, n.substring(IMAGE.length())), size, size);
+                if (b == null) return new ColorDrawable(Color.TRANSPARENT);
+                return new BitmapDrawable(getResources(), b);
+            }
             int[] c = WALLPAPERS[pos];
             GradientDrawable dot = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
                     new int[] {glow(c[3], c[0]), c[1], glow(c[4], c[0])});
@@ -353,9 +427,9 @@ public class MainActivity extends Activity {
             dot.setStroke(Math.max(1, px(2)), 0x26FFFFFF);
             dot.setSize(size, size);
             return dot;
-        }, size, wallpaper(), this::showWallpaper, which -> {
-            getSharedPreferences(PREFS, 0).edit().putString("wallpaper", WALLPAPER_NAMES[which]).apply();
-            showWallpaper(which);
+        }, size, Math.max(0, names.indexOf(wallpaper())), pos -> showWallpaper(names.get(pos)), which -> {
+            getSharedPreferences(PREFS, 0).edit().putString("wallpaper", names.get(which)).apply();
+            showWallpaper(names.get(which));
         });
     }
 
