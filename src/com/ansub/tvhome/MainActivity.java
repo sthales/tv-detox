@@ -440,14 +440,43 @@ public class MainActivity extends Activity {
 
     // Shows a wallpaper by name. An image that can't be read falls back to Dusk.
     private void showWallpaper(String name) {
-        Drawable d = null;
-        if (name.startsWith(IMAGE)) {
-            d = imageWallpaper(new File(IMAGES, name.substring(IMAGE.length())));
-            if (d == null) name = WALLPAPER_NAMES[0];
+        Bitmap b = wallpaperBitmap(name);
+        if (b == null) {
+            name = WALLPAPER_NAMES[0];
+            b = wallpaperBitmap(name);
         }
-        if (d == null) d = background(WALLPAPERS[Math.max(0, Arrays.asList(WALLPAPER_NAMES).indexOf(name))]);
-        getWindow().setBackgroundDrawable(d);
+        getWindow().setBackgroundDrawable(new BitmapDrawable(getResources(), b));
         if (scroller != null) scroller.setContentDescription("wallpaper:" + name);
+    }
+
+    // The wallpaper drawn once into one screen-size picture: gradient layers, or the picture with its
+    // fade. This GPU redraws full-screen gradients on every frame of a focus animation (73 ms a frame
+    // for Dusk), but copies one picture easily. Null for a picture that can't be read. Safe off the
+    // main thread.
+    private Bitmap wallpaperBitmap(String name) {
+        String key = name.startsWith(IMAGE) ? imageKey(name) : name;
+        Bitmap b = decoded.get(key);
+        if (b != null) return b;
+        int w = getResources().getDisplayMetrics().widthPixels, h = getResources().getDisplayMetrics().heightPixels;
+        if (name.startsWith(IMAGE)) {
+            b = crop(new File(IMAGES, name.substring(IMAGE.length())), w, h);
+            if (b == null) return null;
+            GradientDrawable clock = radial(0x8C000000, 0f, 0f, px(1100));
+            GradientDrawable apps = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                    new int[] {Color.TRANSPARENT, Color.TRANSPARENT, 0x99000000});
+            for (GradientDrawable g : new GradientDrawable[] {clock, apps}) g.setDither(true);
+            flatten(new LayerDrawable(new Drawable[] {clock, apps}), b);
+        } else {
+            b = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            flatten(background(WALLPAPERS[Math.max(0, Arrays.asList(WALLPAPER_NAMES).indexOf(name))]), b);
+        }
+        decoded.put(key, b);
+        return b;
+    }
+
+    private static void flatten(Drawable d, Bitmap onto) {
+        d.setBounds(0, 0, onto.getWidth(), onto.getHeight());
+        d.draw(new Canvas(onto));
     }
 
     // Gradients first, then the images in IMAGES by name.
@@ -459,23 +488,6 @@ public class MainActivity extends Activity {
             for (String f : files) if (Config.isImage(f)) out.add(IMAGE + f);
         }
         return out;
-    }
-
-    // An image cropped to the screen, decoded once at about screen size, with a dark fade behind the
-    // clock and the apps so white text stays readable on any picture.
-    private Drawable imageWallpaper(File f) {
-        int w = getResources().getDisplayMetrics().widthPixels, h = getResources().getDisplayMetrics().heightPixels;
-        String key = f.getPath() + "@" + f.lastModified();
-        Bitmap b = decoded.get(key);
-        if (b == null) {
-            b = crop(f, w, h);
-            if (b == null) return null;
-            decoded.put(key, b);
-        }
-        GradientDrawable clock = radial(0x8C000000, 0f, 0f, px(1100));
-        GradientDrawable apps = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[] {Color.TRANSPARENT, Color.TRANSPARENT, 0x99000000});
-        return new LayerDrawable(new Drawable[] {new BitmapDrawable(getResources(), b), clock, apps});
     }
 
     // Decodes f center-cropped to w x h. Big pictures are sampled down while decoding, so a photo
@@ -572,18 +584,13 @@ public class MainActivity extends Activity {
 
     // Shows a wallpaper from the list: gradients and decoded pictures at once, others once decoded.
     private void preview(final String name) {
-        if (!name.startsWith(IMAGE) || decoded.get(imageKey(name)) != null) {
+        if (decoded.get(name.startsWith(IMAGE) ? imageKey(name) : name) != null) {
             showWallpaper(name);
             return;
         }
-        final int w = getResources().getDisplayMetrics().widthPixels, h = getResources().getDisplayMetrics().heightPixels;
-        final File f = new File(IMAGES, name.substring(IMAGE.length()));
         decoder.execute(() -> {
-            Bitmap b = crop(f, w, h);
-            ui.post(() -> {
-                if (b != null) decoded.put(imageKey(name), b);
-                if (name.equals(previewing)) showWallpaper(name);
-            });
+            wallpaperBitmap(name);
+            ui.post(() -> { if (name.equals(previewing)) showWallpaper(name); });
         });
     }
 

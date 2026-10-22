@@ -2,7 +2,7 @@
 # Checks the fork's additions on a TV that already runs this home. Unlike smoke-test.sh it never
 # runs undo.sh, so it is safe on a real TV.
 #   sh ci/extras-test.sh <adb serial or TV_IP> [section]
-# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info. Name one to run only that.
+# Sections run in order: baseline keys wallpaper ambient bell hdmi boot apps banner info perf. Name one to run only that.
 # The enabled accessibility services and the wallpaper are put back afterwards. The key map is reset to
 # extras.sh's default and hidden HDMI inputs are shown again (the app's settings can't be read from adb).
 #   sh ci/extras-test.sh <TV> postboot   right after a real restart, before any script: checks only
@@ -231,6 +231,21 @@ t_info() {
   sh_tv input keyevent KEYCODE_BACK; sleep 1
 }
 
+# Moving through the home must stay smooth: under 10% janky frames and a median frame under 20 ms.
+t_perf() {
+  home; sleep 3
+  sh_tv dumpsys gfxinfo $ME reset >/dev/null
+  for _ in 1 2; do
+    for _ in 1 2 3 4 5 6; do sh_tv input keyevent KEYCODE_DPAD_RIGHT; sleep 0.35; done
+    for _ in 1 2 3 4 5 6; do sh_tv input keyevent KEYCODE_DPAD_LEFT; sleep 0.35; done
+  done
+  stats=$(sh_tv dumpsys gfxinfo $ME | grep -m1 -A12 'Total frames rendered')
+  jank=$(echo "$stats" | sed -n 's/^Janky frames: [0-9]* (\([0-9]*\)\..*/\1/p')
+  p50=$(echo "$stats" | sed -n 's/^50th percentile: \([0-9]*\)ms/\1/p')
+  echo "   janky ${jank}%, median ${p50} ms"
+  [ "${jank:-100}" -lt 10 ] && [ "${p50:-999}" -lt 20 ] || fail "home not smooth: janky ${jank}%, median ${p50} ms"
+}
+
 # Right after a real restart: the remap service and the bell must be back on their own.
 t_postboot() {
   a11y | grep -q "com.ansub.tvhome/" || fail "KeyService not enabled after the restart: $(a11y)"
@@ -243,7 +258,7 @@ if [ "$ONLY" = postboot ]; then echo "== postboot"; t_postboot; echo PASS; exit 
 saved=$(a11y)
 trap 'sh_tv "settings put secure $A11Y '"'"'$saved'"'"'" >/dev/null 2>&1' EXIT
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi boot apps banner info; do
+for t in baseline keys wallpaper ambient bell hdmi boot apps banner info perf; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"
