@@ -1,5 +1,6 @@
 #!/bin/sh
-# Turns on the fork's extras on a TV that runs this home: remote buttons that open apps.
+# Turns on the fork's extras on a TV that runs this home: remote buttons that open apps, and the
+# notification bell.
 #   sh extras.sh <TV_IP>                           TCL button opens Stremio; Netflix, Prime Video and
 #                                                  YouTube buttons work again with Google TV's home off
 #   sh extras.sh <TV_IP> "4020:com.stremio.one"    key code:package, comma separated
@@ -23,6 +24,8 @@ others=$(sh_tv settings get secure enabled_accessibility_services | tr ':' '\n' 
 sh_tv settings put secure enabled_accessibility_services "${others:-null}"
 sh_tv settings put secure enabled_accessibility_services "${others:+$others:}$SVC"
 sh_tv settings put secure accessibility_enabled 1
+# The bell on the home screen reads notifications.
+sh_tv cmd notification allow_listener com.ansub.tvhome/.NotifService
 
 sh_tv am start -n com.ansub.tvhome/.MainActivity --es keys "\"$KEYS\"" --es stamp "$(date +%s)" >/dev/null
 echo "Remote buttons: $KEYS"

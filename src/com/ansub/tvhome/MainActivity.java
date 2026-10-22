@@ -84,6 +84,7 @@ public class MainActivity extends Activity {
     private static final String[] QUICK_LABELS = {"Bluetooth", "Sound", "Picture"};
     private static final int[][] QUICK_ICONS = {LineIcon.BLUETOOTH, LineIcon.SOUND, LineIcon.PICTURE};
     private static final String NETWORK = "network";
+    private static final String NOTIFS = "notifs";
     private static final int OFFLINE = 0, ETHERNET = 4; // network states; 1 to 3 are Wi-Fi bars
     // TCL keeps its own Picture and Sound panels in a service; Android's Sound page is missing there.
     private static final String TCL_SHOW_WINDOW = "com.tcl.settings.SHOW_WINDOW";
@@ -157,6 +158,7 @@ public class MainActivity extends Activity {
     // The network tile follows the connection live: Wi-Fi bars, Ethernet or Offline. Only its icon and
     // label change, so nothing is rebuilt.
     private ImageView netIcon;
+    private ImageView bellIcon; // null while the app has no notification access
     private int netState = -1;
     private final ConnectivityManager.NetworkCallback networkChanged = new ConnectivityManager.NetworkCallback() {
         @Override public void onAvailable(Network n) { runOnUiThread(MainActivity.this::refreshNetwork); }
@@ -224,6 +226,8 @@ public class MainActivity extends Activity {
         if (android.os.Build.VERSION.SDK_INT >= 33) registerReceiver(packagesChanged, f, Context.RECEIVER_EXPORTED);
         else registerReceiver(packagesChanged, f);
 
+        NotifService.onChange = this::refreshBell;
+
         ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm != null) try {
             if (android.os.Build.VERSION.SDK_INT >= 24) cm.registerDefaultNetworkCallback(networkChanged);
@@ -233,6 +237,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        NotifService.onChange = null;
         unregisterReceiver(packagesChanged);
         ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         if (cm != null) try { cm.unregisterNetworkCallback(networkChanged); } catch (Exception ignored) {}
@@ -558,11 +563,18 @@ public class MainActivity extends Activity {
         List<Integer> quick = quickList();
         int ib = px(ICON_BUTTON), ig = px(ICON_GAP);
         // The last icon's right edge lines up with the apps' (its focus circle sticks out past them).
+        int icons = quick.size() + (NotifService.live != null ? 1 : 0);
         int qx = getResources().getDisplayMetrics().widthPixels - m + (ib - px(ICON_SIZE)) / 2
-                - (quick.size() + 1) * ib - quick.size() * ig;
+                - (icons + 1) * ib - icons * ig;
         for (int q : quick) {
             addIcon(QUICK + QUICK_NAMES[q], Strings.t(QUICK_LABELS[q]), new LineIcon(QUICK_ICONS[q]), qx);
             qx += ib + ig;
+        }
+        bellIcon = null;
+        if (NotifService.live != null) {
+            bellIcon = addIcon(NOTIFS, Strings.t("Notifications"), null, qx);
+            qx += ib + ig;
+            refreshBell();
         }
         netIcon = addIcon(NETWORK, Strings.t("Network"), null, qx);
         netState = -1;
@@ -718,6 +730,9 @@ public class MainActivity extends Activity {
         } else if (isInput(key)) {
             openInput(key);
             return;
+        } else if (NOTIFS.equals(key)) {
+            showNotifications();
+            return;
         } else if (NETWORK.equals(key)) {
             openNetworkSettings();
             return;
@@ -820,6 +835,62 @@ public class MainActivity extends Activity {
         }
         ((View) netIcon.getParent()).setContentDescription(
                 state == OFFLINE ? Strings.t("Offline") : state == ETHERNET ? "Ethernet" : "Wi-Fi");
+    }
+
+    // The bell: how many notifications there are, with a dot when one arrived since the list was last opened.
+    private void refreshBell() {
+        if ((NotifService.live != null) != (bellIcon != null)) {
+            dirty = true;
+            refreshApps();
+            return;
+        }
+        if (bellIcon == null) return;
+        int count = NotifService.list().size();
+        boolean unseen = NotifService.lastPosted() > getSharedPreferences(PREFS, 0).getLong("bell_seen", 0);
+        Drawable bell = new LineIcon(LineIcon.BELL);
+        if (unseen) {
+            GradientDrawable dot = new GradientDrawable();
+            dot.setShape(GradientDrawable.OVAL);
+            dot.setColor(0xFFFF5A5A);
+            LayerDrawable both = new LayerDrawable(new Drawable[] {bell, dot});
+            int s = px(ICON_SIZE);
+            both.setLayerInset(1, s * 2 / 3, 0, 0, s * 2 / 3);
+            bell = both;
+        }
+        bellIcon.setImageDrawable(bell);
+        ((View) bellIcon.getParent()).setContentDescription(
+                Strings.t("Notifications") + " " + count + (unseen ? " new" : ""));
+    }
+
+    // The notifications, newest first: app, title and text. OK opens one and clears it if it can be
+    // cleared; ongoing ones like AirPlay stay. The last row clears every one that can be cleared.
+    private void showNotifications() {
+        getSharedPreferences(PREFS, 0).edit().putLong("bell_seen", System.currentTimeMillis()).apply();
+        refreshBell();
+        final List<android.service.notification.StatusBarNotification> list = NotifService.list();
+        List<String> rows = new ArrayList<>();
+        for (android.service.notification.StatusBarNotification n : list) {
+            Bundle x = n.getNotification().extras;
+            StringBuilder row = new StringBuilder(labelOf(n.getPackageName()));
+            for (String k : new String[] {android.app.Notification.EXTRA_TITLE, android.app.Notification.EXTRA_TEXT}) {
+                CharSequence v = x == null ? null : x.getCharSequence(k);
+                if (v != null && v.toString().trim().length() > 0) row.append(" \u2014 ").append(v.toString().trim());
+            }
+            rows.add(row.toString());
+        }
+        rows.add(Strings.t(list.isEmpty() ? "No notifications" : "Clear all"));
+        panel(Strings.t("Notifications"), rows, which -> {
+            NotifService s = NotifService.live;
+            if (s == null || list.isEmpty()) return;
+            if (which == list.size()) {
+                s.cancelAllNotifications();
+                return;
+            }
+            android.service.notification.StatusBarNotification n = list.get(which);
+            android.app.PendingIntent open = n.getNotification().contentIntent;
+            if (open != null) try { open.send(); } catch (Exception ignored) {}
+            if (n.isClearable()) s.cancelNotification(n.getKey());
+        });
     }
 
     // Wi-Fi settings (on Android TV that page lists Ethernet too), else the TV's network page, else Settings.

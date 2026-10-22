@@ -97,6 +97,25 @@ t_ambient() {
   apps_on || fail "Back didn't leave the ambient view"
 }
 
+bell() { ui | grep -o 'content-desc="Notifications[^"]*"' | head -1; }
+
+t_bell() {
+  sh extras.sh "$TV" >/dev/null || fail "extras.sh failed"
+  home
+  bell | grep -qE 'Notifications [1-9]' || fail "no bell with notifications: '$(bell)'"
+  sh_tv am start -n $ME/.MainActivity >/dev/null; sleep 1
+  sh_tv cmd notification post -t "tvhome test" tvhome-test "hello" >/dev/null; sleep 2
+  bell | grep -q ' new"' || fail "new notification didn't light the bell: '$(bell)'"
+  sh_tv cmd notification post tvhome-empty " " >/dev/null; sleep 2
+  focus | grep -q $ME || fail "home lost focus after an empty notification"
+  sh_tv cmd notification disallow_listener $ME/.NotifService; sleep 2
+  sh_tv am force-stop $ME; home
+  [ -z "$(bell)" ] || fail "bell shown without notification access: '$(bell)'"
+  sh_tv cmd notification allow_listener $ME/.NotifService; sleep 2
+  sh_tv am force-stop $ME; home
+  bell | grep -q 'Notifications' || fail "bell didn't come back with access"
+}
+
 sh_tv logcat -b crash -c
 for t in baseline keys wallpaper ambient bell hdmi; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
