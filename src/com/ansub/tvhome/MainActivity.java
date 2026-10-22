@@ -1295,6 +1295,7 @@ public class MainActivity extends Activity {
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(pad, pad, pad, pad);
         box.setContentDescription("control-center");
+        box.setClipChildren(false);
         Bitmap glass = frosted(w, h);
         box.setBackground(new LayerDrawable(new Drawable[] {
                 glass != null ? new BitmapDrawable(getResources(), glass) : new ColorDrawable(0xFF161113),
@@ -1348,6 +1349,7 @@ public class MainActivity extends Activity {
         for (int i = 0; i < icons.length; i++) {
             if (i % 4 == 0) {
                 row = new LinearLayout(this);
+                row.setClipChildren(false); // a focused tile grows past its row; don't shave its corners
                 LinearLayout.LayoutParams rp = new LinearLayout.LayoutParams(-1, tile);
                 if (i > 0) rp.topMargin = gap;
                 box.addView(row, rp);

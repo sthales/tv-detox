@@ -116,7 +116,7 @@ t_ambient() {
 
 # The bell lives in Control Center's Alerts tile: open it with the cog (83), read, close.
 bell() {
-  sh_tv input keyevent 83; sleep 2
+  sh_tv input keyevent 83; sleep 3 # the first open after a start blurs the wallpaper for the glass
   d=$(ui | grep -o 'content-desc="Notifications[^"]*"' | head -1)
   sh_tv input keyevent KEYCODE_BACK; sleep 1
   echo "$d"
