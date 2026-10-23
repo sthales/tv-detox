@@ -151,6 +151,7 @@ public class MainActivity extends Activity {
     // Back on the home hides the page and leaves the wallpaper and a small clock; any key brings it back.
     private boolean ambient;
     private Showcase showcase; // the screensaver view, while Back has it up
+    private Shelf shelf;
     private LinearLayout npBox;
     private ImageView npArt;
     private TextView npText;
@@ -272,10 +273,11 @@ public class MainActivity extends Activity {
         String saverSound = intent == null ? null : intent.getStringExtra("saver_sound");
         String saverVolume = intent == null ? null : intent.getStringExtra("saver_volume");
         String lower = intent == null ? null : intent.getStringExtra("lower");
+        String stremioKey = intent == null ? null : intent.getStringExtra("stremio_key");
         if (apps == null && quick == null && keys == null && wall == null && hidden == null && banner == null
                 && rotate == null && rotation == null && name == null && avatar == null && settings == null
                 && every == null && showcase == null && sources == null && drift == null && slide == null && wheel == null && sharp == null
-                && tvSaver == null && lower == null && saverSound == null && saverVolume == null) return false;
+                && tvSaver == null && lower == null && saverSound == null && saverVolume == null && stremioKey == null) return false;
         SharedPreferences prefs = getSharedPreferences(PREFS, 0);
         String stamp = intent.getStringExtra("stamp");
         if (stamp != null && stamp.equals(prefs.getString("stamp", null))) return false;
@@ -299,6 +301,10 @@ public class MainActivity extends Activity {
         if (sharp != null) e.putBoolean("saver_4k", sharp.trim().equals("on"));
         if (tvSaver != null) e.putBoolean("tv_saver", tvSaver.trim().equals("on"));
         if (lower != null) e.putString("lower", Config.joinSet(Config.splitSet(lower)));
+        if (stremioKey != null) {
+            if (stremioKey.trim().equals("off")) e.remove("stremio_key");
+            else e.putString("stremio_key", stremioKey.trim());
+        }
         if (saverSound != null) e.putString("saver_sound", saverSound.trim().equals("off") ? "" : saverSound.trim());
         if (saverVolume != null) try { e.putInt("saver_volume", Integer.parseInt(saverVolume.trim())); } catch (NumberFormatException ignored) {}
         if (apps != null) {
@@ -322,6 +328,7 @@ public class MainActivity extends Activity {
         }
         e.commit(); // not apply(): a script may restart the TV or the app right after sending this
         if (tvSaver != null) applySaver(this);
+        if (stremioKey != null) Stremio.refresh(this, () -> {});
         dirty = true;
         return true;
     }
@@ -362,6 +369,7 @@ public class MainActivity extends Activity {
         refreshNowPlaying();
         rotateIfDue();
         OnlinePictures.refresh(this);
+        Stremio.refresh(this, null);
         View f = getCurrentFocus();
         if (f == null && !tiles.isEmpty()) tiles.get(0).requestFocus();
     }
@@ -445,6 +453,7 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        if (shelf != null && shelf.key(event)) return true;
         if (!ambient) return super.dispatchKeyEvent(event);
         if (showcase != null && showcase.key(event)) return true;
         if (event.getAction() == KeyEvent.ACTION_UP) showAmbient(false);
@@ -456,7 +465,29 @@ public class MainActivity extends Activity {
         super.onPause();
         ui.removeCallbacks(rotateTick);
         showAmbient(false);
+        closeShelf();
         NowPlaying.unlisten(this, npRefresh);
+    }
+
+    private void showShelf() {
+        if (shelf != null) return;
+        shelf = new Shelf(this, Stremio.continueWatching(this), Stremio.popular(this), regular, semibold, this::closeShelf);
+        addContentView(shelf, new FrameLayout.LayoutParams(-1, -1));
+        scroller.setVisibility(View.INVISIBLE);
+        if (!shelf.focusFirst()) Stremio.refresh(this, () -> {
+            if (shelf == null || Stremio.popular(this).isEmpty() && Stremio.continueWatching(this).isEmpty()) return;
+            closeShelf();
+            showShelf();
+        });
+    }
+
+    private void closeShelf() {
+        if (shelf == null) return;
+        ((ViewGroup) shelf.getParent()).removeView(shelf);
+        shelf = null;
+        scroller.setVisibility(View.VISIBLE);
+        View t = tile(Stremio.PACKAGE);
+        if (t != null) t.requestFocus();
     }
 
     private void showAmbient(boolean on) {
@@ -684,7 +715,7 @@ public class MainActivity extends Activity {
 
     // Decodes f center-cropped to w x h. Big pictures are sampled down while decoding, so a photo
     // from a phone never needs more memory than about one screen.
-    private static Bitmap crop(File f, int w, int h) {
+    static Bitmap crop(File f, int w, int h) {
         try {
             BitmapFactory.Options o = new BitmapFactory.Options();
             o.inJustDecodeBounds = true;
@@ -1287,6 +1318,10 @@ public class MainActivity extends Activity {
             if (key.equals(movingKey)) return moveKey(key, code, ok, down);
             if (editable && code == KeyEvent.KEYCODE_MENU) {
                 if (!down) menu.run();
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_DPAD_UP && Stremio.PACKAGE.equals(key) && y == gridTop) {
+                if (down) showShelf();
                 return true;
             }
             if (!ok) return false;

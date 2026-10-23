@@ -25,6 +25,11 @@ public class ConfigTest {
         realTimeUndoesTheAnimationSpeed();
         roundRisesOnTheLeftAndSetsOnTheRight();
         bingTitleDropsTheCredit();
+        stremioEpisodeComesFromTheVideoId();
+        stremioTimeLeftForMovies();
+        stremioProgressIsAFraction();
+        stremioLinkOpensTheEpisode();
+        popularMixesMoviesAndSeriesWithoutTheLibrary();
         System.out.println("OK");
     }
 
@@ -205,5 +210,40 @@ public class ConfigTest {
                 Config.bingTitle("Outono no Parque Nacional Naejangsan, Coreia do Sul (© Twenty47studio/Getty Images)"));
         assert "Plain".equals(Config.bingTitle("Plain"));
         assert "".equals(Config.bingTitle(null));
+    }
+
+    static void stremioEpisodeComesFromTheVideoId() {
+        assert "S4 · E3".equals(Config.episode("tt5875444", "tt5875444:4:3"));
+        assert "E5".equals(Config.episode("kitsu:1234", "kitsu:1234:5"));
+        assert Config.episode("tt0111161", "tt0111161") == null;
+        assert Config.episode("tt0111161", null) == null;
+        assert Config.episode("tt1", "tt12:1:2") == null : "another title's episode";
+    }
+
+    static void stremioTimeLeftForMovies() {
+        assert "1h 12m left".equals(Config.timeLeft(30 * 60000L, 102 * 60000L));
+        assert "25m left".equals(Config.timeLeft(95 * 60000L, 120 * 60000L));
+        assert "1m left".equals(Config.timeLeft(119 * 60000L + 50000, 120 * 60000L));
+        assert Config.timeLeft(1000, 0) == null;
+        assert Config.timeLeft(5000, 1000) == null;
+    }
+
+    static void stremioProgressIsAFraction() {
+        assert Config.progress(30, 120) == 0.25f;
+        assert Config.progress(200, 120) == 1f;
+        assert Config.progress(5, 0) == 0f;
+    }
+
+    static void stremioLinkOpensTheEpisode() {
+        assert "stremio:///detail/series/tt5875444/tt5875444:4:3".equals(Config.stremioLink("series", "tt5875444", "tt5875444:4:3"));
+        assert "stremio:///detail/movie/tt0111161".equals(Config.stremioLink("movie", "tt0111161", "tt0111161"));
+        assert "stremio:///detail/movie/tt0111161".equals(Config.stremioLink("movie", "tt0111161", null));
+    }
+
+    static void popularMixesMoviesAndSeriesWithoutTheLibrary() {
+        java.util.List<String> mix = Config.mix(Arrays.asList("m1", "m2", "m3"), Arrays.asList("s1", "m2", "s2"),
+                new java.util.HashSet<>(Arrays.asList("s1")), 4);
+        assert mix.equals(Arrays.asList("m1", "m2", "m3", "s2")) : mix;
+        assert Config.mix(Arrays.asList("a"), Arrays.<String>asList(), new java.util.HashSet<String>(), 10).equals(Arrays.asList("a"));
     }
 }

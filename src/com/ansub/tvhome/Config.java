@@ -1,7 +1,10 @@
 package com.ansub.tvhome;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -177,6 +180,38 @@ final class Config {
     static float[] push(float p, int dir) {
         float far = 1f + GAP;
         return new float[] {dir * p * far, -dir * (1f - p) * far};
+    }
+
+    static String episode(String id, String videoId) {
+        if (id == null || videoId == null || !videoId.startsWith(id + ":")) return null;
+        String[] p = videoId.substring(id.length() + 1).split(":");
+        try {
+            if (p.length == 2) return "S" + Integer.parseInt(p[0]) + " · E" + Integer.parseInt(p[1]);
+            if (p.length == 1) return "E" + Integer.parseInt(p[0]);
+        } catch (NumberFormatException ignored) {}
+        return null;
+    }
+
+    static String timeLeft(long offsetMs, long durationMs) {
+        if (durationMs <= 0 || offsetMs >= durationMs) return null;
+        long m = Math.max(1, Math.round((durationMs - offsetMs) / 60000.0));
+        return (m >= 60 ? m / 60 + "h " + m % 60 + "m" : m + "m") + " left";
+    }
+
+    static float progress(long offset, long duration) {
+        return duration <= 0 ? 0f : Math.min(1f, offset / (float) duration);
+    }
+
+    static String stremioLink(String type, String id, String videoId) {
+        return "stremio:///detail/" + type + "/" + id + (videoId == null || videoId.equals(id) ? "" : "/" + videoId);
+    }
+
+    static List<String> mix(List<String> a, List<String> b, java.util.Set<String> skip, int max) {
+        java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+        for (int i = 0; i < Math.max(a.size(), b.size()) && out.size() < max; i++)
+            for (List<String> l : Arrays.asList(a, b))
+                if (i < l.size() && !skip.contains(l.get(i)) && out.size() < max) out.add(l.get(i));
+        return new ArrayList<>(out);
     }
 
     // Bing's caption is "Title (© credit)": the title only.

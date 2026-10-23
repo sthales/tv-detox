@@ -173,7 +173,7 @@ final class OnlinePictures {
         }
     }
 
-    private static String text(String url) throws Exception {
+    static String text(String url) throws Exception {
         HttpURLConnection h = open(url);
         try (InputStream in = h.getInputStream()) {
             return new String(read(in), "UTF-8");
@@ -182,7 +182,7 @@ final class OnlinePictures {
         }
     }
 
-    private static HttpURLConnection open(String url) throws Exception {
+    static HttpURLConnection open(String url) throws Exception {
         HttpURLConnection h = (HttpURLConnection) new URL(url).openConnection();
         h.setConnectTimeout(10000);
         h.setReadTimeout(30000);
@@ -192,7 +192,7 @@ final class OnlinePictures {
         return h;
     }
 
-    private static byte[] read(InputStream in) throws java.io.IOException {
+    static byte[] read(InputStream in) throws java.io.IOException {
         ByteArrayOutputStream b = new ByteArrayOutputStream();
         byte[] buf = new byte[16 * 1024];
         for (int n; (n = in.read(buf)) > 0; ) b.write(buf, 0, n);
