@@ -23,6 +23,7 @@ public class ConfigTest {
         slideDirectionTakesTurns();
         pushPassesBlackBetweenThePictures();
         realTimeUndoesTheAnimationSpeed();
+        roundStartsFlatAndRisesFromBelow();
         bingTitleDropsTheCredit();
         System.out.println("OK");
     }
@@ -179,6 +180,21 @@ public class ConfigTest {
         assert Config.realTime(14000, 1f) == 14000;
         assert Config.realTime(1500, 2f) == 750;
         assert Config.realTime(14000, 0f) == 14000;
+    }
+
+    static void roundStartsFlatAndRisesFromBelow() {
+        float w = 1920, h = 1080;
+        float[] flat = Config.wheel(0f, w, h);
+        float[] rect = {0, 0, w, 0, w, h, 0, h};
+        for (int i = 0; i < 8; i++) assert Math.abs(flat[i] - rect[i]) < 0.01f : Arrays.toString(flat);
+        float[] next = Config.wheel(Config.WHEEL_STEP, w, h);
+        assert next[1] >= h && next[3] >= h : "the next photo should wait below the screen " + Arrays.toString(next);
+        assert next[4] - next[6] < next[2] - next[0] : "its far (bottom) edge should look smaller " + Arrays.toString(next);
+        assert next[2] - next[0] < w && next[2] - next[0] > 0.85f * w : "subtle, not tiny " + Arrays.toString(next);
+        float[] prev = Config.wheel(-Config.WHEEL_STEP, w, h);
+        assert prev[5] <= 0 && prev[7] <= 0 : "the old photo leaves above the screen " + Arrays.toString(prev);
+        assert Math.abs(prev[5] - (h - next[3])) < 0.5f : "up and down mirror each other";
+        assert Config.WHEEL_STEP * 180 / Math.PI > 20 && Config.WHEEL_STEP * 180 / Math.PI < 30 : "a gentle curve you can still see";
     }
 
     static void bingTitleDropsTheCredit() {

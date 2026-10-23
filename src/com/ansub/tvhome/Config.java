@@ -152,6 +152,20 @@ final class Config {
         return seed % 2 == 0 ? 1 : -1;
     }
 
+    static final float WHEEL_R = 3f, WHEEL_EYE = 2f, WHEEL_STEP = (1f + GAP) / WHEEL_R;
+
+    static float[] wheel(float angle, float w, float h) {
+        float a = w / (2 * h), c = (float) Math.cos(angle), s = (float) Math.sin(angle);
+        float[] corners = {-a, -0.5f, a, -0.5f, a, 0.5f, -a, 0.5f}, q = new float[8];
+        for (int i = 0; i < 8; i += 2) {
+            float x = corners[i], y = corners[i + 1];
+            float z = WHEEL_R * (1 - c) + y * s, f = WHEEL_EYE / (WHEEL_EYE + z);
+            q[i] = w / 2 + x * f * h;
+            q[i + 1] = h / 2 + (y * c + WHEEL_R * s) * f * h;
+        }
+        return q;
+    }
+
     static long realTime(long ms, float scale) {
         return scale > 0 ? Math.round(ms / (double) scale) : ms;
     }

@@ -43,6 +43,7 @@ final class Showcase extends FrameLayout {
         long interval();
         boolean drift();
         boolean slide();
+        boolean wheel();
         boolean sharp4k();
     }
 
@@ -66,7 +67,9 @@ final class Showcase extends FrameLayout {
     private Bitmap cur, nxt;
     private float[] curD = STILL, nxtD = STILL;
     private boolean curFit, nxtFit;
-    private float curT, nxtT, curA = 1f, nxtA = 1f, curX, nxtX;
+    private float curT, nxtT, curA = 1f, nxtA = 1f, pushP = -1f;
+    private int pushDir, pushTurn;
+    private final Matrix[] poses = new Matrix[2];
     private ValueAnimator fader, mover, pusher;
     private final Ambience ambience;
 
@@ -215,7 +218,8 @@ final class Showcase extends FrameLayout {
             ui.post(() -> {
                 if (!running || g != gen) return;
                 int dir = !source.slide() ? 0 : manual ? (step > 0 ? -1 : 1) : Config.slideDir(seed);
-                if (b != null) show(s, b, seed, dir);
+                int turn = source.wheel() ? (step > 0 ? 1 : -1) : 0;
+                if (b != null) show(s, b, seed, dir, turn);
                 ui.postDelayed(advance, b != null ? Math.max(FADE * 2, source.interval()) + (dir != 0 ? Config.SLIDE : 0) : 1000);
             });
         });
@@ -230,10 +234,10 @@ final class Showcase extends FrameLayout {
     }
 
     // The new picture fades in over the old one, drifting from the moment it appears.
-    private void show(Slide s, Bitmap b, int seed, final int dir) {
+    private void show(Slide s, Bitmap b, int seed, final int dir, final int turn) {
         caption.setText(s.caption == null ? "" : s.caption);
         if (surface != null) {
-            show4k(s, b, seed, dir);
+            show4k(s, b, seed, dir, turn);
             return;
         }
         if (pusher != null) pusher.cancel();
@@ -259,16 +263,18 @@ final class Showcase extends FrameLayout {
         v.setAlpha(0f);
         final ImageView old = views[front];
         old.animate().cancel();
+        final int o = front;
         front = back;
         if (dir != 0) {
             final float vw = getWidth() > 0 ? getWidth() : getResources().getDisplayMetrics().widthPixels;
+            final float vh = getHeight() > 0 ? getHeight() : getResources().getDisplayMetrics().heightPixels;
+            poses[back] = pose(false, 0f, dir, turn, vw, vh);
             pusher = ValueAnimator.ofFloat(0f, 1f);
             pusher.setDuration(real(getContext(), Config.SLIDE));
             pusher.addUpdateListener(an -> {
                 float p = (float) an.getAnimatedValue();
-                float[] x = Config.push(p, dir);
-                old.setTranslationX(x[0] * vw);
-                v.setTranslationX(x[1] * vw);
+                poses[o] = pose(true, p, dir, turn, vw, vh);
+                poses[back] = pose(false, p, dir, turn, vw, vh);
                 old.setAlpha(1f - p);
                 v.setAlpha(p);
             });
@@ -276,22 +282,20 @@ final class Showcase extends FrameLayout {
                 @Override public void onAnimationEnd(android.animation.Animator an) {
                     old.setAlpha(0f);
                     old.setImageDrawable(null);
-                    old.setTranslationX(0f);
-                    v.setTranslationX(0f);
+                    poses[0] = poses[1] = null;
                     v.setAlpha(1f);
                 }
             });
             pusher.start();
             return;
         }
-        v.setTranslationX(0f);
         v.animate().alpha(1f).setDuration(real(getContext(), FADE)).withEndAction(() -> {
             old.setAlpha(0f);
             old.setImageDrawable(null);
         }).start();
     }
 
-    private void show4k(Slide s, Bitmap b, int seed, final int dir) {
+    private void show4k(Slide s, Bitmap b, int seed, final int dir, final int turn) {
         if (fader != null) fader.cancel();
         nxt = b;
         nxtD = motion(seed, dir);
@@ -305,9 +309,9 @@ final class Showcase extends FrameLayout {
             float p = (float) an.getAnimatedValue();
             nxtA = p;
             if (dir != 0) {
-                float[] x = Config.push(p, dir);
-                curX = x[0];
-                nxtX = x[1];
+                pushP = p;
+                pushDir = dir;
+                pushTurn = turn;
                 curA = 1f - p;
             }
             render();
@@ -322,7 +326,7 @@ final class Showcase extends FrameLayout {
                 nxt = null;
                 curA = 1f;
                 nxtA = 1f;
-                curX = nxtX = 0f;
+                pushP = -1f;
                 render();
             }
         });
@@ -351,19 +355,28 @@ final class Showcase extends FrameLayout {
             if (cur != null) {
                 p.setAlpha(Math.round(curA * 255));
                 Matrix m = matrix(cur, curD, curT, curFit, c.getWidth(), c.getHeight());
-                m.postTranslate(curX * c.getWidth(), 0f);
+                if (pushP >= 0) m.postConcat(pose(true, pushP, pushDir, pushTurn, c.getWidth(), c.getHeight()));
                 c.drawBitmap(cur, m, p);
             }
             if (nxt != null) {
                 p.setAlpha(Math.round(nxtA * 255));
                 Matrix m = matrix(nxt, nxtD, nxtT, nxtFit, c.getWidth(), c.getHeight());
-                m.postTranslate(nxtX * c.getWidth(), 0f);
+                if (pushP >= 0) m.postConcat(pose(false, pushP, pushDir, pushTurn, c.getWidth(), c.getHeight()));
                 c.drawBitmap(nxt, m, p);
             }
         } catch (Exception ignored) {
         } finally {
             if (c != null) try { surface.getHolder().unlockCanvasAndPost(c); } catch (Exception ignored) {}
         }
+    }
+
+    private static Matrix pose(boolean old, float p, int dir, int turn, float w, float h) {
+        Matrix m = new Matrix();
+        if (turn != 0) {
+            float angle = (old ? -p : 1f - p) * Config.WHEEL_STEP * turn;
+            m.setPolyToPoly(new float[] {0, 0, w, 0, w, h, 0, h}, 0, Config.wheel(angle, w, h), 0, 4);
+        } else m.setTranslate(Config.push(p, dir)[old ? 0 : 1] * w, 0f);
+        return m;
     }
 
     private static Matrix matrix(Bitmap b, float[] d, float t, boolean fit, float vw, float vh) {
@@ -381,7 +394,10 @@ final class Showcase extends FrameLayout {
     private void place(ImageView v, Bitmap b, float[] d, float t, boolean fit) {
         float vw = getWidth() > 0 ? getWidth() : getResources().getDisplayMetrics().widthPixels;
         float vh = getHeight() > 0 ? getHeight() : getResources().getDisplayMetrics().heightPixels;
-        v.setImageMatrix(matrix(b, d, t, fit, vw, vh));
+        Matrix m = matrix(b, d, t, fit, vw, vh);
+        Matrix pz = poses[v == views[0] ? 0 : 1];
+        if (pz != null) m.postConcat(pz);
+        v.setImageMatrix(m);
     }
 
     static long real(Context c, long ms) {

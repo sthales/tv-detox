@@ -266,6 +266,7 @@ public class MainActivity extends Activity {
         String sources = intent == null ? null : intent.getStringExtra("sources");
         String drift = intent == null ? null : intent.getStringExtra("saver_drift");
         String slide = intent == null ? null : intent.getStringExtra("saver_slide");
+        String wheel = intent == null ? null : intent.getStringExtra("saver_wheel");
         String sharp = intent == null ? null : intent.getStringExtra("saver_4k");
         String tvSaver = intent == null ? null : intent.getStringExtra("tv_saver");
         String saverSound = intent == null ? null : intent.getStringExtra("saver_sound");
@@ -273,7 +274,7 @@ public class MainActivity extends Activity {
         String lower = intent == null ? null : intent.getStringExtra("lower");
         if (apps == null && quick == null && keys == null && wall == null && hidden == null && banner == null
                 && rotate == null && rotation == null && name == null && avatar == null && settings == null
-                && every == null && showcase == null && sources == null && drift == null && slide == null && sharp == null
+                && every == null && showcase == null && sources == null && drift == null && slide == null && wheel == null && sharp == null
                 && tvSaver == null && lower == null && saverSound == null && saverVolume == null) return false;
         SharedPreferences prefs = getSharedPreferences(PREFS, 0);
         String stamp = intent.getStringExtra("stamp");
@@ -294,6 +295,7 @@ public class MainActivity extends Activity {
         }
         if (drift != null) e.putBoolean("saver_drift", drift.trim().equals("on"));
         if (slide != null) e.putBoolean("saver_slide", slide.trim().equals("on"));
+        if (wheel != null) e.putBoolean("saver_wheel", wheel.trim().equals("on"));
         if (sharp != null) e.putBoolean("saver_4k", sharp.trim().equals("on"));
         if (tvSaver != null) e.putBoolean("tv_saver", tvSaver.trim().equals("on"));
         if (lower != null) e.putString("lower", Config.joinSet(Config.splitSet(lower)));
@@ -509,6 +511,7 @@ public class MainActivity extends Activity {
             }
             @Override public boolean drift() { return c.getSharedPreferences(PREFS, 0).getBoolean("saver_drift", false); }
             @Override public boolean slide() { return c.getSharedPreferences(PREFS, 0).getBoolean("saver_slide", false); }
+            @Override public boolean wheel() { return c.getSharedPreferences(PREFS, 0).getBoolean("saver_wheel", false); }
             @Override public boolean sharp4k() { return c.getSharedPreferences(PREFS, 0).getBoolean("saver_4k", true); }
         };
     }
@@ -547,8 +550,10 @@ public class MainActivity extends Activity {
         actions.add(() -> p.edit().putInt("saver_volume", SAVER_VOLUMES[(volume + 1) % SAVER_VOLUMES.length]).commit());
         rows.add(Strings.t("Drift") + ": " + (p.getBoolean("saver_drift", false) ? on : off));
         actions.add(() -> p.edit().putBoolean("saver_drift", !p.getBoolean("saver_drift", false)).putBoolean("saver_slide", false).commit());
-        rows.add(Strings.t("Slide") + ": " + (p.getBoolean("saver_slide", false) ? on : off));
-        actions.add(() -> p.edit().putBoolean("saver_slide", !p.getBoolean("saver_slide", false)).putBoolean("saver_drift", false).commit());
+        final boolean slide = p.getBoolean("saver_slide", false), round = slide && p.getBoolean("saver_wheel", false);
+        rows.add(Strings.t("Slide") + ": " + (!slide ? off : Strings.t(round ? "Round" : "Side")));
+        actions.add(() -> p.edit().putBoolean("saver_slide", !round).putBoolean("saver_wheel", slide && !round)
+                .putBoolean("saver_drift", false).commit());
         rows.add("4K: " + (p.getBoolean("saver_4k", true) ? on : off));
         actions.add(() -> p.edit().putBoolean("saver_4k", !p.getBoolean("saver_4k", true)).commit());
         rows.add(Strings.t("Use as TV screensaver") + ": " + (p.getBoolean("tv_saver", true) ? on : off));
