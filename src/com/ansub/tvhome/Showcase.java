@@ -213,8 +213,9 @@ final class Showcase extends FrameLayout {
             final Bitmap b = source.load(s, w, h);
             ui.post(() -> {
                 if (!running || g != gen) return;
-                if (b != null) show(s, b, seed, source.slide() && !manual);
-                ui.postDelayed(advance, b != null ? Math.max(FADE * 2, source.interval()) : 1000);
+                boolean dip = source.slide() && !manual;
+                if (b != null) show(s, b, seed, dip);
+                ui.postDelayed(advance, b != null ? Math.max(FADE * 2, source.interval()) + (dip ? Config.DIP : 0) : 1000);
             });
         });
     }
@@ -224,7 +225,7 @@ final class Showcase extends FrameLayout {
     }
 
     private long life(boolean dip) {
-        return source.interval() + (dip ? Config.DIP : FADE * 2);
+        return source.interval() + (dip ? Config.DIP + Config.DIP_OUT : FADE * 2);
     }
 
     // The new picture fades in over the old one, drifting from the moment it appears.

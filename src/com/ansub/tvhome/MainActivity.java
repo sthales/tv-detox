@@ -513,8 +513,8 @@ public class MainActivity extends Activity {
         };
     }
 
-    private static final String[] SAVER_EVERY = {"1m", "5m", "15m", "30m"};
-    private static final String[] SAVER_EVERY_LABELS = {"1 min", "5 min", "15 min", "30 min"};
+    private static final String[] SAVER_EVERY = {"11s", "1m", "5m", "15m", "30m"};
+    private static final String[] SAVER_EVERY_LABELS = {"11 sec", "1 min", "5 min", "15 min", "30 min"};
     private static final String[] SOURCE_LABELS = {"Places", "Earth", "Space"};
 
     private static final int[] SAVER_VOLUMES = {10, 20, 30};

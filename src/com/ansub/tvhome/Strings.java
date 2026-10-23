@@ -19,7 +19,7 @@ final class Strings {
         "In rotation", "Set as wallpaper", "5 min", "10 min",
         "Start now", "Change picture", "every %s", "Your pictures", "Places", "Earth", "Space", "Drift",
         "Use as TV screensaver", "On", "1 min", "15 min", "Add to screensaver", "Remove from screensaver",
-        "Auto saver", "Volume", "Slide",
+        "Auto saver", "Volume", "Slide", "11 sec",
     };
 
     // Keyed by language ("de"), or language-country ("zh-TW") where a country writes it differently.
