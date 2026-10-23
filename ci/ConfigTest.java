@@ -147,15 +147,15 @@ public class ConfigTest {
 
     static void slideGlidesAtLoadingScreenSpeedEitherWay() {
         float[] right = Config.slide(10000, 1), left = Config.slide(10000, -1);
-        assert right[0] == right[1] && right[0] > 1f && right[0] <= 1.04f : "barely zoomed " + Arrays.toString(right);
-        assert right[3] == 0f && right[5] == 0f : Arrays.toString(right);
-        assert Math.abs(right[4] - right[2] - 0.025f) < 1e-4 : "half the loading screen speed " + Arrays.toString(right);
-        assert Math.abs(left[2] - left[4] - 0.025f) < 1e-4 : Arrays.toString(left);
+        assert right[0] == right[1] && right[0] == 1.12f : Arrays.toString(right);
+        assert right[3] == (right[0] - 1) / 2 && right[5] == right[3] : "top edge pinned to the screen top " + Arrays.toString(right);
+        assert Math.abs(right[4] - right[2] - 0.05f) < 1e-4 : "the loading screen speed " + Arrays.toString(right);
+        assert Math.abs(left[2] - left[4] - 0.05f) < 1e-4 : Arrays.toString(left);
         for (long ms : new long[] {10000, 66000, 30 * 60000}) {
             float[] d = Config.slide(ms, 1);
             assert Math.abs(d[2]) <= (d[0] - 1) / 2 + 1e-6 && Math.abs(d[4]) <= (d[1] - 1) / 2 + 1e-6 : Arrays.toString(d);
         }
-        assert Config.slide(15000, 1)[4] - Config.slide(15000, 1)[2] > 0.037f : "11 s on screen still glides at full speed";
+        assert Config.slide(30 * 60000, 1)[4] > 0.05f;
     }
 
     static void slideDirectionTakesTurns() {
