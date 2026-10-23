@@ -213,7 +213,7 @@ print(sum(1 for i in range(0,len(px),16) if px[i]<40 and px[i+1]>215 and px[i+2]
 t_banner() {
   tmp=$(mktemp -d)
   B=$FILES/banners/com.google.android.youtube.tv
-  for e in png jpg jpeg webp; do sh_tv ls $B.$e >/dev/null 2>&1 && adb -s "$TV" pull $B.$e "$tmp/mine.$e" >/dev/null 2>&1; done
+  for e in png jpg jpeg webp; do adb -s "$TV" pull $B.$e "$tmp/mine.$e" >/dev/null 2>&1 || true; done
   python3 -c 'import sys,zlib,struct
 w,h=640,360
 c=lambda t,d:struct.pack(">I",len(d))+t+d+struct.pack(">I",zlib.crc32(t+d))

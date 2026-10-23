@@ -742,6 +742,7 @@ public class MainActivity extends Activity {
             src.recycle();
             return out;
         } catch (Throwable t) {
+            android.util.Log.w("tvhome", "can't decode " + f.getName() + " at " + w + "x" + h, t);
             return null;
         }
     }
