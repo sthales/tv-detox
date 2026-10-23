@@ -165,7 +165,7 @@ public class ConfigTest {
 
     static void pushPassesBlackBetweenThePictures() {
         float far = 1f + Config.GAP;
-        assert Config.GAP == 0.25f;
+        assert Config.GAP == 0.35f;
         assert Config.push(0f, 1)[0] == 0f && Config.push(0f, 1)[1] == -far;
         assert Config.push(1f, 1)[0] == far && Config.push(1f, 1)[1] == 0f;
         float[] mid = Config.push(0.5f, -1);

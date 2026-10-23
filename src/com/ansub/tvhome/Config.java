@@ -141,7 +141,7 @@ final class Config {
     }
 
     static final long SLIDE = 1500;
-    static final float GAP = 0.25f;
+    static final float GAP = 0.35f;
 
     static float[] slide(long ms, int dir) {
         float zoom = 1.12f, travel = Math.min(0.005f * ms / 1000f, zoom - 1);
