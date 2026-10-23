@@ -13,6 +13,10 @@ case "$TV" in *:*) adb connect "$TV" >/dev/null 2>&1 || true ;; esac
 adb -s "$TV" shell pm path com.ansub.tvhome >/dev/null 2>&1 || { echo "The home isn't installed on $TV; nothing to back up." >&2; exit 1; }
 
 FILES=/sdcard/Android/data/com.ansub.tvhome/files
+if adb -s "$TV" shell dumpsys power | grep -q "mWakefulness=Dreaming"; then
+  adb -s "$TV" shell input keyevent KEYCODE_WAKEUP
+  sleep 2
+fi
 adb -s "$TV" shell rm -f $FILES/settings.json
 adb -s "$TV" shell am start -n com.ansub.tvhome/.MainActivity --es settings export --es stamp "b$(date +%s)" >/dev/null
 for _ in 1 2 3 4 5 6 7 8 9 10; do adb -s "$TV" shell ls $FILES/settings.json >/dev/null 2>&1 && break; sleep 1; done

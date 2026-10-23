@@ -30,6 +30,7 @@ public class ConfigTest {
         stremioProgressIsAFraction();
         stremioLinkOpensTheEpisode();
         popularMixesMoviesAndSeriesWithoutTheLibrary();
+        coverKeepsTheTopOfTallPictures();
         System.out.println("OK");
     }
 
@@ -245,5 +246,12 @@ public class ConfigTest {
                 new java.util.HashSet<>(Arrays.asList("s1")), 4);
         assert mix.equals(Arrays.asList("m1", "m2", "m3", "s2")) : mix;
         assert Config.mix(Arrays.asList("a"), Arrays.<String>asList(), new java.util.HashSet<String>(), 10).equals(Arrays.asList("a"));
+    }
+
+    static void coverKeepsTheTopOfTallPictures() {
+        float[] tall = Config.cover(1000, 1000, 1920, 1080);
+        assert tall[0] == 1.92f && tall[1] == 0f && tall[2] == 0f : "keeps the top, cuts the bottom " + Arrays.toString(tall);
+        float[] wide = Config.cover(4000, 1000, 1920, 1080);
+        assert wide[0] == 1.08f && wide[1] == (1920 - 4000 * 1.08f) / 2 && wide[2] == 0f : "wide pictures stay centered " + Arrays.toString(wide);
     }
 }

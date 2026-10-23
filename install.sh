@@ -43,7 +43,7 @@ if [ ! -f "$APK" ]; then
 fi
 
 if adb -s "$TV" shell pm path com.ansub.tvhome >/dev/null 2>&1; then
-  sh backup.sh "$TV" || echo "Couldn't back up the current settings; installing anyway."
+  sh backup.sh "$TV" || [ -n "$FORCE" ] || { echo "Couldn't back up the current settings, so nothing was installed. FORCE=1 installs anyway." >&2; exit 1; }
 fi
 
 echo "Installing… If your TV shows a Google Play Protect message, follow it on the TV to allow the install."

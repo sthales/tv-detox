@@ -182,6 +182,11 @@ final class Config {
         return new float[] {dir * p * far, -dir * (1f - p) * far};
     }
 
+    static float[] cover(int sw, int sh, int w, int h) {
+        float s = Math.max((float) w / sw, (float) h / sh);
+        return new float[] {s, (w - sw * s) / 2, 0f};
+    }
+
     static String episode(String id, String videoId) {
         if (id == null || videoId == null || !videoId.startsWith(id + ":")) return null;
         String[] p = videoId.substring(id.length() + 1).split(":");

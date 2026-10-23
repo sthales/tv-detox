@@ -240,6 +240,7 @@ public class MainActivity extends Activity {
         setIntent(intent);
         openFrom(intent);
         if (saveConfig(intent)) {
+            closeShelf();
             showWallpaper(wallpaper());
             buildTiles();
         }
@@ -434,7 +435,7 @@ public class MainActivity extends Activity {
     // Rebuilds the tiles if apps changed, but only while Home is in front with no menu open and no
     // app being moved; otherwise the next onResume, focus change or end of the move does it.
     private void refreshApps() {
-        if (!dirty || !hasWindowFocus() || movingKey != null) return;
+        if (!dirty || !hasWindowFocus() || movingKey != null || shelf != null) return;
         dirty = false;
         buildTiles();
     }
@@ -490,6 +491,7 @@ public class MainActivity extends Activity {
         scroller.setVisibility(View.VISIBLE);
         View t = tile(Stremio.PACKAGE);
         if (t != null) t.requestFocus();
+        refreshApps();
     }
 
     private void showAmbient(boolean on) {
@@ -728,11 +730,11 @@ public class MainActivity extends Activity {
             o.inJustDecodeBounds = false;
             Bitmap src = BitmapFactory.decodeFile(f.getPath(), o);
             if (src == null) return null;
-            float s = Math.max((float) w / src.getWidth(), (float) h / src.getHeight());
+            float[] fit = Config.cover(src.getWidth(), src.getHeight(), w, h);
             Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
             Canvas c = new Canvas(out);
-            c.translate((w - src.getWidth() * s) / 2, (h - src.getHeight() * s) / 2);
-            c.scale(s, s);
+            c.translate(fit[1], fit[2]);
+            c.scale(fit[0], fit[0]);
             c.drawBitmap(src, 0, 0, new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG));
             src.recycle();
             return out;
