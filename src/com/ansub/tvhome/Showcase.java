@@ -218,8 +218,8 @@ final class Showcase extends FrameLayout {
             final Bitmap b = source.load(s, w, h);
             ui.post(() -> {
                 if (!running || g != gen) return;
-                int turn = source.slide() && source.wheel() ? (step > 0 ? 1 : -1) : 0;
-                int dir = !source.slide() ? 0 : turn != 0 ? turn : manual ? (step > 0 ? -1 : 1) : Config.slideDir(seed);
+                int dir = !source.slide() ? 0 : manual ? (step > 0 ? -1 : 1) : Config.slideDir(seed);
+                int turn = source.wheel() ? dir : 0;
                 swap = turn != 0 ? Config.ROUND : Config.SLIDE;
                 if (b != null) show(s, b, seed, dir, turn);
                 ui.postDelayed(advance, b != null ? Math.max(FADE * 2, source.interval()) + (dir != 0 ? swap : 0) : 1000);
