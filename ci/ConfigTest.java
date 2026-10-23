@@ -19,8 +19,9 @@ public class ConfigTest {
         rotationCyclesThroughTheChosenOnly();
         rotationIsDueAfterTheInterval();
         driftStaysInsideThePicture();
-        slideGlidesRightAtLoadingScreenSpeed();
-        slideDipsThroughBlack();
+        slideGlidesAtLoadingScreenSpeedEitherWay();
+        slideDirectionTakesTurns();
+        pushPassesBlackBetweenThePictures();
         bingTitleDropsTheCredit();
         System.out.println("OK");
     }
@@ -142,24 +143,34 @@ public class ConfigTest {
         assert !java.util.Arrays.equals(Config.drift(1), Config.drift(2));
     }
 
-    static void slideGlidesRightAtLoadingScreenSpeed() {
-        float[] quick = Config.slide(10000);
-        assert quick[0] == quick[1] && quick[0] > 1f : Arrays.toString(quick);
-        assert quick[3] == 0f && quick[5] == 0f : Arrays.toString(quick);
-        assert Math.abs(quick[4] - quick[2] - 0.05f) < 1e-4 : Arrays.toString(quick);
-        assert quick[4] > quick[2];
+    static void slideGlidesAtLoadingScreenSpeedEitherWay() {
+        float[] right = Config.slide(10000, 1), left = Config.slide(10000, -1);
+        assert right[0] == right[1] && right[0] > 1f : Arrays.toString(right);
+        assert right[3] == 0f && right[5] == 0f : Arrays.toString(right);
+        assert Math.abs(right[4] - right[2] - 0.05f) < 1e-4 : Arrays.toString(right);
+        assert Math.abs(left[2] - left[4] - 0.05f) < 1e-4 : Arrays.toString(left);
         for (long ms : new long[] {10000, 66000, 30 * 60000}) {
-            float[] d = Config.slide(ms);
+            float[] d = Config.slide(ms, 1);
             assert Math.abs(d[2]) <= (d[0] - 1) / 2 + 1e-6 && Math.abs(d[4]) <= (d[1] - 1) / 2 + 1e-6 : Arrays.toString(d);
         }
-        assert Config.slide(30 * 60000)[4] > 0.05f;
+        assert Config.slide(30 * 60000, 1)[4] > 0.05f;
     }
 
-    static void slideDipsThroughBlack() {
-        assert Config.dipOut(0) == 1f && Config.dipOut(600) == 0.5f && Config.dipOut(1200) == 0f && Config.dipOut(5000) == 0f;
-        assert Config.dipIn(0) == 0f && Config.dipIn(3200) == 0f && Config.dipIn(4700) == 0.5f && Config.dipIn(6200) == 1f;
-        assert Config.dipIn(9000) == 1f;
-        assert Config.DIP == 6200;
+    static void slideDirectionTakesTurns() {
+        assert Config.slideDir(0) == -Config.slideDir(1);
+        assert Config.slideDir(1) == -Config.slideDir(2);
+        assert Math.abs(Config.slideDir(7)) == 1;
+    }
+
+    static void pushPassesBlackBetweenThePictures() {
+        float far = 1f + Config.GAP;
+        assert Config.GAP == 0.25f;
+        assert Config.push(0f, 1)[0] == 0f && Config.push(0f, 1)[1] == -far;
+        assert Config.push(1f, 1)[0] == far && Config.push(1f, 1)[1] == 0f;
+        float[] mid = Config.push(0.5f, -1);
+        assert mid[0] == -far / 2 && mid[1] == far / 2 : Arrays.toString(mid);
+        assert Math.abs(mid[1] - mid[0] - 1f - Config.GAP) < 1e-6;
+        assert Config.SLIDE == 1500;
     }
 
     static void bingTitleDropsTheCredit() {

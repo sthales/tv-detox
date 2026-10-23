@@ -140,19 +140,21 @@ final class Config {
         return d;
     }
 
-    static final long DIP_OUT = 1200, DIP_BLACK = 2000, DIP_IN = 3000, DIP = DIP_OUT + DIP_BLACK + DIP_IN;
+    static final long SLIDE = 1500;
+    static final float GAP = 0.25f;
 
-    static float[] slide(long ms) {
+    static float[] slide(long ms, int dir) {
         float zoom = 1.12f, travel = Math.min(0.005f * ms / 1000f, zoom - 1);
-        return new float[] {zoom, zoom, -travel / 2, 0f, travel / 2, 0f};
+        return new float[] {zoom, zoom, -dir * travel / 2, 0f, dir * travel / 2, 0f};
     }
 
-    static float dipOut(long t) {
-        return 1f - Math.max(0f, Math.min(1f, t / (float) DIP_OUT));
+    static int slideDir(int seed) {
+        return seed % 2 == 0 ? 1 : -1;
     }
 
-    static float dipIn(long t) {
-        return Math.max(0f, Math.min(1f, (t - DIP_OUT - DIP_BLACK) / (float) DIP_IN));
+    static float[] push(float p, int dir) {
+        float far = 1f + GAP;
+        return new float[] {dir * p * far, -dir * (1f - p) * far};
     }
 
     // Bing's caption is "Title (© credit)": the title only.
