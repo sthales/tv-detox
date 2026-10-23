@@ -472,6 +472,7 @@ public class MainActivity extends Activity {
     private void showShelf() {
         if (shelf != null) return;
         shelf = new Shelf(this, Stremio.continueWatching(this), Stremio.popular(this), regular, semibold, this::closeShelf);
+        root.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         addContentView(shelf, new FrameLayout.LayoutParams(-1, -1));
         scroller.setVisibility(View.INVISIBLE);
         if (!shelf.focusFirst()) Stremio.refresh(this, () -> {
@@ -485,6 +486,7 @@ public class MainActivity extends Activity {
         if (shelf == null) return;
         ((ViewGroup) shelf.getParent()).removeView(shelf);
         shelf = null;
+        root.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
         scroller.setVisibility(View.VISIBLE);
         View t = tile(Stremio.PACKAGE);
         if (t != null) t.requestFocus();

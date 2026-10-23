@@ -96,7 +96,7 @@ final class Shelf extends FrameLayout {
 
         rows = new FrameLayout(c);
         rows.setClipChildren(false);
-        addView(rows, new LayoutParams(-1, -1));
+        addView(rows, new LayoutParams(-1, px(1080 + ROW2 - ROW1)));
         boolean both = !watching.isEmpty() && !popular.isEmpty();
         if (!watching.isEmpty()) rowOne = row(Strings.t("Continue watching"), watching, ROW1, firstRow);
         if (!popular.isEmpty()) {
@@ -125,6 +125,12 @@ final class Shelf extends FrameLayout {
             return true;
         }
         View f = findFocus();
+        boolean nav = code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT
+                || code == KeyEvent.KEYCODE_DPAD_UP || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER;
+        if (f == null && nav) {
+            if (press) focusFirst();
+            return true;
+        }
         if (code == KeyEvent.KEYCODE_DPAD_DOWN && (f == null || lastRow.contains(f))) {
             if (press) close.run();
             return true;
@@ -164,10 +170,13 @@ final class Shelf extends FrameLayout {
         col.setGravity(Gravity.CENTER_HORIZONTAL);
         col.setClipChildren(false);
         final FrameLayout card = new FrameLayout(c);
-        final GradientDrawable bg = new GradientDrawable();
+        GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(px(14));
         bg.setColor(0x22FFFFFF);
         card.setBackground(bg);
+        final GradientDrawable ring = new GradientDrawable();
+        ring.setCornerRadius(px(14));
+        card.setForeground(ring);
         card.setClipToOutline(true);
         card.setFocusable(true);
         card.setContentDescription("shelf:" + m.id);
@@ -212,7 +221,7 @@ final class Shelf extends FrameLayout {
 
         card.setOnFocusChangeListener((v, has) -> {
             v.animate().scaleX(has ? 1.1f : 1f).scaleY(has ? 1.1f : 1f).translationZ(has ? px(20) : 0).setDuration(140).start();
-            bg.setStroke(has ? px(4) : 0, Color.WHITE);
+            ring.setStroke(has ? px(4) : 0, Color.WHITE);
             under.setVisibility(has ? View.VISIBLE : View.INVISIBLE);
             if (has) focused(m, lastRow.contains(v) && !firstRow.contains(v));
         });
