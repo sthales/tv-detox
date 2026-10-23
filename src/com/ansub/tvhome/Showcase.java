@@ -42,6 +42,7 @@ final class Showcase extends FrameLayout {
         Bitmap load(Slide s, int w, int h); // called off the main thread
         long interval();
         boolean drift();
+        boolean slide();
         boolean sharp4k();
     }
 
@@ -59,13 +60,13 @@ final class Showcase extends FrameLayout {
     private final float scale;
     private List<Slide> slides = new ArrayList<>();
     private int index = -1, front = 0, gen;
-    private final Runnable advance = () -> go(1);
+    private final Runnable advance = () -> go(1, false);
     private boolean running;
     private android.view.SurfaceView surface;
     private Bitmap cur, nxt;
     private float[] curD = STILL, nxtD = STILL;
     private boolean curFit, nxtFit;
-    private float curT, nxtT, fade = 1f;
+    private float curT, nxtT, curA = 1f, nxtA = 1f;
     private ValueAnimator fader, mover;
     private final Ambience ambience;
 
@@ -132,7 +133,7 @@ final class Showcase extends FrameLayout {
         running = true;
         slides = new ArrayList<>(source.slides());
         Collections.shuffle(slides);
-        go(1);
+        go(1, false);
         ambience.start();
     }
 
@@ -157,7 +158,7 @@ final class Showcase extends FrameLayout {
             default:
                 return false;
         }
-        if (e.getAction() == android.view.KeyEvent.ACTION_DOWN) go(step);
+        if (e.getAction() == android.view.KeyEvent.ACTION_DOWN) go(step, true);
         return true;
     }
 
@@ -192,7 +193,7 @@ final class Showcase extends FrameLayout {
         playing.setVisibility(VISIBLE);
     }
 
-    private void go(int step) {
+    private void go(int step, final boolean manual) {
         if (!running || slides.isEmpty()) return;
         ui.removeCallbacks(advance);
         final int g = ++gen;
@@ -206,23 +207,31 @@ final class Showcase extends FrameLayout {
             sw = mode.getPhysicalWidth();
             sh = mode.getPhysicalHeight();
         }
-        float room = source.drift() ? HEADROOM : 1f;
+        float room = source.drift() || source.slide() ? HEADROOM : 1f;
         final int w = Math.round(sw * room), h = Math.round(sh * room);
         decoder.execute(() -> {
             final Bitmap b = source.load(s, w, h);
             ui.post(() -> {
                 if (!running || g != gen) return;
-                if (b != null) show(s, b, seed);
+                if (b != null) show(s, b, seed, source.slide() && !manual);
                 ui.postDelayed(advance, b != null ? Math.max(FADE * 2, source.interval()) : 1000);
             });
         });
     }
 
+    private float[] motion(int seed, long life) {
+        return source.slide() ? Config.slide(life) : source.drift() ? Config.drift(seed) : STILL;
+    }
+
+    private long life(boolean dip) {
+        return source.interval() + (dip ? Config.DIP : FADE * 2);
+    }
+
     // The new picture fades in over the old one, drifting from the moment it appears.
-    private void show(Slide s, Bitmap b, int seed) {
+    private void show(Slide s, Bitmap b, int seed, boolean dip) {
         caption.setText(s.caption == null ? "" : s.caption);
         if (surface != null) {
-            show4k(s, b, seed);
+            show4k(s, b, seed, dip);
             return;
         }
         final int back = 1 - front;
@@ -233,36 +242,44 @@ final class Showcase extends FrameLayout {
         // shade, clock and caption (Z = 2) always on top.
         v.setTranslationZ(1f);
         views[front].setTranslationZ(0f);
-        final float[] d = source.drift() ? Config.drift(seed) : STILL;
+        final float[] d = motion(seed, life(dip));
         final boolean fit = s.fit;
         if (drifts[back] != null) drifts[back].cancel();
         ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
-        a.setDuration(source.interval() + FADE * 2);
+        a.setDuration(life(dip));
         a.setInterpolator(new android.view.animation.LinearInterpolator());
         a.addUpdateListener(an -> place(v, b, d, (float) an.getAnimatedValue(), fit));
         place(v, b, d, 0f, fit);
         a.start();
         drifts[back] = a;
+        v.animate().cancel();
         v.setAlpha(0f);
         final ImageView old = views[front];
-        v.animate().alpha(1f).setDuration(FADE).withEndAction(() -> {
+        old.animate().cancel();
+        if (dip) old.animate().alpha(0f).setStartDelay(0).setDuration(Config.DIP_OUT).start();
+        v.animate().alpha(1f).setStartDelay(dip ? Config.DIP_OUT + Config.DIP_BLACK : 0)
+                .setDuration(dip ? Config.DIP_IN : FADE).withEndAction(() -> {
             old.setAlpha(0f);
             old.setImageDrawable(null);
         }).start();
         front = back;
     }
 
-    private void show4k(Slide s, Bitmap b, int seed) {
+    private void show4k(Slide s, Bitmap b, int seed, final boolean dip) {
+        if (fader != null) fader.cancel();
         nxt = b;
-        nxtD = source.drift() ? Config.drift(seed) : STILL;
+        nxtD = motion(seed, life(dip));
         nxtFit = s.fit;
         nxtT = 0f;
+        nxtA = 0f;
         surface.setContentDescription("slide:" + s.key);
-        if (fader != null) fader.cancel();
         fader = ValueAnimator.ofFloat(0f, 1f);
-        fader.setDuration(cur == null ? 1 : FADE);
+        fader.setDuration(dip ? Config.DIP : cur == null ? 1 : FADE);
         fader.addUpdateListener(an -> {
-            fade = (float) an.getAnimatedValue();
+            if (dip) {
+                curA = Config.dipOut(an.getCurrentPlayTime());
+                nxtA = Config.dipIn(an.getCurrentPlayTime());
+            } else nxtA = (float) an.getAnimatedValue();
             render();
         });
         fader.addListener(new android.animation.AnimatorListenerAdapter() {
@@ -273,14 +290,15 @@ final class Showcase extends FrameLayout {
                 curFit = nxtFit;
                 curT = nxtT;
                 nxt = null;
-                fade = 1f;
+                curA = 1f;
+                nxtA = 1f;
                 render();
             }
         });
         if (mover != null) mover.cancel();
-        if (source.drift()) {
+        if (source.drift() || source.slide()) {
             mover = ValueAnimator.ofFloat(0f, 1f);
-            mover.setDuration(source.interval() + FADE * 2);
+            mover.setDuration(life(dip));
             mover.setInterpolator(new android.view.animation.LinearInterpolator());
             mover.addUpdateListener(an -> {
                 float t = (float) an.getAnimatedValue();
@@ -299,9 +317,12 @@ final class Showcase extends FrameLayout {
             c = surface.getHolder().lockHardwareCanvas();
             c.drawColor(Color.BLACK);
             android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG);
-            if (cur != null) c.drawBitmap(cur, matrix(cur, curD, curT, curFit, c.getWidth(), c.getHeight()), p);
+            if (cur != null) {
+                p.setAlpha(Math.round(curA * 255));
+                c.drawBitmap(cur, matrix(cur, curD, curT, curFit, c.getWidth(), c.getHeight()), p);
+            }
             if (nxt != null) {
-                p.setAlpha(Math.round(fade * 255));
+                p.setAlpha(Math.round(nxtA * 255));
                 c.drawBitmap(nxt, matrix(nxt, nxtD, nxtT, nxtFit, c.getWidth(), c.getHeight()), p);
             }
         } catch (Exception ignored) {

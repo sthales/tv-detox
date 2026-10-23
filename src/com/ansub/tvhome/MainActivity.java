@@ -265,6 +265,7 @@ public class MainActivity extends Activity {
         String showcase = intent == null ? null : intent.getStringExtra("showcase");
         String sources = intent == null ? null : intent.getStringExtra("sources");
         String drift = intent == null ? null : intent.getStringExtra("saver_drift");
+        String slide = intent == null ? null : intent.getStringExtra("saver_slide");
         String sharp = intent == null ? null : intent.getStringExtra("saver_4k");
         String tvSaver = intent == null ? null : intent.getStringExtra("tv_saver");
         String saverSound = intent == null ? null : intent.getStringExtra("saver_sound");
@@ -272,7 +273,7 @@ public class MainActivity extends Activity {
         String lower = intent == null ? null : intent.getStringExtra("lower");
         if (apps == null && quick == null && keys == null && wall == null && hidden == null && banner == null
                 && rotate == null && rotation == null && name == null && avatar == null && settings == null
-                && every == null && showcase == null && sources == null && drift == null && sharp == null
+                && every == null && showcase == null && sources == null && drift == null && slide == null && sharp == null
                 && tvSaver == null && lower == null && saverSound == null && saverVolume == null) return false;
         SharedPreferences prefs = getSharedPreferences(PREFS, 0);
         String stamp = intent.getStringExtra("stamp");
@@ -292,6 +293,7 @@ public class MainActivity extends Activity {
             for (String src : OnlinePictures.SOURCES) e.putBoolean("src_" + src, on.contains("all") || on.contains(src));
         }
         if (drift != null) e.putBoolean("saver_drift", drift.trim().equals("on"));
+        if (slide != null) e.putBoolean("saver_slide", slide.trim().equals("on"));
         if (sharp != null) e.putBoolean("saver_4k", sharp.trim().equals("on"));
         if (tvSaver != null) e.putBoolean("tv_saver", tvSaver.trim().equals("on"));
         if (lower != null) e.putString("lower", Config.joinSet(Config.splitSet(lower)));
@@ -506,6 +508,7 @@ public class MainActivity extends Activity {
                 return ms > 0 ? ms : 5 * 60 * 1000L;
             }
             @Override public boolean drift() { return c.getSharedPreferences(PREFS, 0).getBoolean("saver_drift", false); }
+            @Override public boolean slide() { return c.getSharedPreferences(PREFS, 0).getBoolean("saver_slide", false); }
             @Override public boolean sharp4k() { return c.getSharedPreferences(PREFS, 0).getBoolean("saver_4k", true); }
         };
     }
@@ -543,7 +546,9 @@ public class MainActivity extends Activity {
         rows.add(Strings.t("Volume") + ": " + SAVER_VOLUMES[volume] + "%");
         actions.add(() -> p.edit().putInt("saver_volume", SAVER_VOLUMES[(volume + 1) % SAVER_VOLUMES.length]).commit());
         rows.add(Strings.t("Drift") + ": " + (p.getBoolean("saver_drift", false) ? on : off));
-        actions.add(() -> p.edit().putBoolean("saver_drift", !p.getBoolean("saver_drift", false)).commit());
+        actions.add(() -> p.edit().putBoolean("saver_drift", !p.getBoolean("saver_drift", false)).putBoolean("saver_slide", false).commit());
+        rows.add(Strings.t("Slide") + ": " + (p.getBoolean("saver_slide", false) ? on : off));
+        actions.add(() -> p.edit().putBoolean("saver_slide", !p.getBoolean("saver_slide", false)).putBoolean("saver_drift", false).commit());
         rows.add("4K: " + (p.getBoolean("saver_4k", true) ? on : off));
         actions.add(() -> p.edit().putBoolean("saver_4k", !p.getBoolean("saver_4k", true)).commit());
         rows.add(Strings.t("Use as TV screensaver") + ": " + (p.getBoolean("tv_saver", true) ? on : off));

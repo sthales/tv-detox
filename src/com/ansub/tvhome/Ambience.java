@@ -10,7 +10,7 @@ import android.os.Looper;
 import java.io.File;
 
 final class Ambience {
-    private static final long WAIT = 5000, FADE_IN = 10000, FADE_OUT = 4000;
+    private static final long WAIT = 5000, FADE_IN = 20000, FADE_OUT = 4000;
 
     private final Context c;
     private final Handler ui = new Handler(Looper.getMainLooper());

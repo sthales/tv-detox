@@ -390,24 +390,28 @@ t_settings() {
 
 picked() { ui | grep -o '<node [^>]*selected="true"[^>]*>' | grep -o 'text="[^"]*"' | head -1 | sed 's/text="\(.*\)"/\1/'; }
 t_saver() {
-  sh_tv am start -n $ME/.MainActivity --es showcase_every 1m --es sources none --es saver_drift off --es saver_4k on \
+  sh_tv am start -n $ME/.MainActivity --es showcase_every 1m --es sources none --es saver_drift off --es saver_slide off --es saver_4k on \
     --es stamp "sv$(date +%s)" >/dev/null; sleep 1
   sh_tv am start -n $ME/.MainActivity --es open saver >/dev/null; sleep 2
   x=$(ui)
   for t in 'Start now' 'Change picture: every 1 min' 'Places: Off' 'Earth: Off' 'Space: Off'; do
     echo "$x" | grep -q "text=\"$t" || fail "the Screensaver panel has no '$t'"
   done
-  for _ in 1 2 3 4 5 6 7 8 9 10 11; do sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 0.3; done; sleep 1
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 0.3; done; sleep 1
   x=$(ui)
-  for t in 'Drift: Off' '4K: On' 'Use as TV screensaver'; do
+  for t in 'Drift: Off' 'Slide: Off' '4K: On' 'Use as TV screensaver'; do
     echo "$x" | grep -q "text=\"$t" || fail "the Screensaver panel has no '$t'"
   done
   for _ in 1 2 3 4 5 6 7 8 9 10; do [ "$(picked)" = "Drift: Off" ] && break; sh_tv input keyevent KEYCODE_DPAD_UP; sleep 0.5; done
   [ "$(picked)" = "Drift: Off" ] || fail "couldn't reach Drift (on: $(picked))"
   sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
   [ "$(picked)" = "Drift: On" ] || fail "OK on Drift didn't switch it on and stay on the row (on: $(picked))"
+  sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 0.5; sh_tv input keyevent KEYCODE_DPAD_CENTER; sleep 1
+  [ "$(picked)" = "Slide: On" ] || fail "OK on Slide didn't switch it on (on: $(picked))"
+  sh_tv input keyevent KEYCODE_DPAD_UP; sleep 0.5
+  [ "$(picked)" = "Drift: Off" ] || fail "Slide on didn't turn Drift off (on: $(picked))"
   sh_tv input keyevent KEYCODE_BACK; sleep 1
-  sh_tv am start -n $ME/.MainActivity --es saver_drift off --es sources all --es showcase_every 5m --es stamp "sw$(date +%s)" >/dev/null
+  sh_tv am start -n $ME/.MainActivity --es saver_drift off --es saver_slide off --es sources all --es showcase_every 5m --es stamp "sw$(date +%s)" >/dev/null
 }
 
 t_star() {

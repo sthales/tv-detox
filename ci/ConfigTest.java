@@ -19,6 +19,8 @@ public class ConfigTest {
         rotationCyclesThroughTheChosenOnly();
         rotationIsDueAfterTheInterval();
         driftStaysInsideThePicture();
+        slideGlidesRightAtLoadingScreenSpeed();
+        slideDipsThroughBlack();
         bingTitleDropsTheCredit();
         System.out.println("OK");
     }
@@ -138,6 +140,26 @@ public class ConfigTest {
             assert Math.abs(d[4]) <= (d[1] - 1) / 2 + 1e-6 && Math.abs(d[5]) <= (d[1] - 1) / 2 + 1e-6 : java.util.Arrays.toString(d);
         }
         assert !java.util.Arrays.equals(Config.drift(1), Config.drift(2));
+    }
+
+    static void slideGlidesRightAtLoadingScreenSpeed() {
+        float[] quick = Config.slide(10000);
+        assert quick[0] == quick[1] && quick[0] > 1f : Arrays.toString(quick);
+        assert quick[3] == 0f && quick[5] == 0f : Arrays.toString(quick);
+        assert Math.abs(quick[4] - quick[2] - 0.05f) < 1e-4 : Arrays.toString(quick);
+        assert quick[4] > quick[2];
+        for (long ms : new long[] {10000, 66000, 30 * 60000}) {
+            float[] d = Config.slide(ms);
+            assert Math.abs(d[2]) <= (d[0] - 1) / 2 + 1e-6 && Math.abs(d[4]) <= (d[1] - 1) / 2 + 1e-6 : Arrays.toString(d);
+        }
+        assert Config.slide(30 * 60000)[4] > 0.05f;
+    }
+
+    static void slideDipsThroughBlack() {
+        assert Config.dipOut(0) == 1f && Config.dipOut(600) == 0.5f && Config.dipOut(1200) == 0f && Config.dipOut(5000) == 0f;
+        assert Config.dipIn(0) == 0f && Config.dipIn(3200) == 0f && Config.dipIn(4700) == 0.5f && Config.dipIn(6200) == 1f;
+        assert Config.dipIn(9000) == 1f;
+        assert Config.DIP == 6200;
     }
 
     static void bingTitleDropsTheCredit() {

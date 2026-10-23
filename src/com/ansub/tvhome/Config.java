@@ -140,6 +140,21 @@ final class Config {
         return d;
     }
 
+    static final long DIP_OUT = 1200, DIP_BLACK = 2000, DIP_IN = 3000, DIP = DIP_OUT + DIP_BLACK + DIP_IN;
+
+    static float[] slide(long ms) {
+        float zoom = 1.12f, travel = Math.min(0.005f * ms / 1000f, zoom - 1);
+        return new float[] {zoom, zoom, -travel / 2, 0f, travel / 2, 0f};
+    }
+
+    static float dipOut(long t) {
+        return 1f - Math.max(0f, Math.min(1f, t / (float) DIP_OUT));
+    }
+
+    static float dipIn(long t) {
+        return Math.max(0f, Math.min(1f, (t - DIP_OUT - DIP_BLACK) / (float) DIP_IN));
+    }
+
     // Bing's caption is "Title (© credit)": the title only.
     static String bingTitle(String copyright) {
         if (copyright == null) return "";
