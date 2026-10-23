@@ -249,7 +249,7 @@ final class Showcase extends FrameLayout {
         final boolean fit = s.fit;
         if (drifts[back] != null) drifts[back].cancel();
         ValueAnimator a = ValueAnimator.ofFloat(0f, 1f);
-        a.setDuration(life(dir));
+        a.setDuration(real(getContext(), life(dir)));
         a.setInterpolator(new android.view.animation.LinearInterpolator());
         a.addUpdateListener(an -> place(v, b, d, (float) an.getAnimatedValue(), fit));
         place(v, b, d, 0f, fit);
@@ -263,7 +263,7 @@ final class Showcase extends FrameLayout {
         if (dir != 0) {
             final float vw = getWidth() > 0 ? getWidth() : getResources().getDisplayMetrics().widthPixels;
             pusher = ValueAnimator.ofFloat(0f, 1f);
-            pusher.setDuration(Config.SLIDE);
+            pusher.setDuration(real(getContext(), Config.SLIDE));
             pusher.addUpdateListener(an -> {
                 float p = (float) an.getAnimatedValue();
                 float[] x = Config.push(p, dir);
@@ -285,7 +285,7 @@ final class Showcase extends FrameLayout {
             return;
         }
         v.setTranslationX(0f);
-        v.animate().alpha(1f).setDuration(FADE).withEndAction(() -> {
+        v.animate().alpha(1f).setDuration(real(getContext(), FADE)).withEndAction(() -> {
             old.setAlpha(0f);
             old.setImageDrawable(null);
         }).start();
@@ -300,7 +300,7 @@ final class Showcase extends FrameLayout {
         nxtA = 0f;
         surface.setContentDescription("slide:" + s.key);
         fader = ValueAnimator.ofFloat(0f, 1f);
-        fader.setDuration(dir != 0 ? Config.SLIDE : cur == null ? 1 : FADE);
+        fader.setDuration(real(getContext(), dir != 0 ? Config.SLIDE : cur == null ? 1 : FADE));
         fader.addUpdateListener(an -> {
             float p = (float) an.getAnimatedValue();
             nxtA = p;
@@ -329,7 +329,7 @@ final class Showcase extends FrameLayout {
         if (mover != null) mover.cancel();
         if (source.drift() || source.slide()) {
             mover = ValueAnimator.ofFloat(0f, 1f);
-            mover.setDuration(life(dir));
+            mover.setDuration(real(getContext(), life(dir)));
             mover.setInterpolator(new android.view.animation.LinearInterpolator());
             mover.addUpdateListener(an -> {
                 float t = (float) an.getAnimatedValue();
@@ -382,6 +382,11 @@ final class Showcase extends FrameLayout {
         float vw = getWidth() > 0 ? getWidth() : getResources().getDisplayMetrics().widthPixels;
         float vh = getHeight() > 0 ? getHeight() : getResources().getDisplayMetrics().heightPixels;
         v.setImageMatrix(matrix(b, d, t, fit, vw, vh));
+    }
+
+    static long real(Context c, long ms) {
+        return Config.realTime(ms, android.provider.Settings.Global.getFloat(c.getContentResolver(),
+                android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f));
     }
 
     private int px(int v) { return Math.round(v * scale); }

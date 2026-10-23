@@ -22,6 +22,7 @@ public class ConfigTest {
         slideGlidesAtLoadingScreenSpeedEitherWay();
         slideDirectionTakesTurns();
         pushPassesBlackBetweenThePictures();
+        realTimeUndoesTheAnimationSpeed();
         bingTitleDropsTheCredit();
         System.out.println("OK");
     }
@@ -171,6 +172,13 @@ public class ConfigTest {
         assert mid[0] == -far / 2 && mid[1] == far / 2 : Arrays.toString(mid);
         assert Math.abs(mid[1] - mid[0] - 1f - Config.GAP) < 1e-6;
         assert Config.SLIDE == 1500;
+    }
+
+    static void realTimeUndoesTheAnimationSpeed() {
+        assert Config.realTime(14000, 0.5f) == 28000;
+        assert Config.realTime(14000, 1f) == 14000;
+        assert Config.realTime(1500, 2f) == 750;
+        assert Config.realTime(14000, 0f) == 14000;
     }
 
     static void bingTitleDropsTheCredit() {

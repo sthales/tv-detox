@@ -93,7 +93,7 @@ final class Ambience {
             return;
         }
         fader = ValueAnimator.ofFloat(level, target);
-        fader.setDuration(ms);
+        fader.setDuration(Showcase.real(c, ms));
         fader.setInterpolator(target > level ? new android.view.animation.AccelerateInterpolator(2f)
                 : new android.view.animation.DecelerateInterpolator(2f));
         fader.addUpdateListener(a -> {

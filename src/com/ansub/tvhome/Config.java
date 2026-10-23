@@ -152,6 +152,10 @@ final class Config {
         return seed % 2 == 0 ? 1 : -1;
     }
 
+    static long realTime(long ms, float scale) {
+        return scale > 0 ? Math.round(ms / (double) scale) : ms;
+    }
+
     static float[] push(float p, int dir) {
         float far = 1f + GAP;
         return new float[] {dir * p * far, -dir * (1f - p) * far};
