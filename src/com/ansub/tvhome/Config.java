@@ -152,17 +152,21 @@ final class Config {
         return seed % 2 == 0 ? 1 : -1;
     }
 
-    static final float WHEEL_R = 3f, WHEEL_EYE = 2f, WHEEL_STEP = (1f + GAP) / WHEEL_R;
+    static final long ROUND = 2000;
+    static final float SUN_R = 3.4f, SUN_GAP = 0.6f, SUN_TURN = 45f, SUN_DEPTH = 0.8f, SUN_EYE = 1.6f;
 
-    static float[] wheel(float angle, float w, float h) {
-        float a = w / (2 * h), c = (float) Math.cos(angle), s = (float) Math.sin(angle);
-        float[] corners = {-a, -0.5f, a, -0.5f, a, 0.5f, -a, 0.5f}, q = new float[8];
+    static float[] sun(float u, float w, float h) {
+        double arc = Math.asin((1 + SUN_GAP) / SUN_R) * u, phi = Math.toRadians(SUN_TURN) * u;
+        float zc = SUN_DEPTH * u * u, s = SUN_EYE / (SUN_EYE + zc);
+        float cx = w / 2 + SUN_R * (float) Math.sin(arc) * w * s, cy = h / 2 + SUN_R * (1 - (float) Math.cos(arc)) * w * s;
+        float b = h / (2 * w);
+        float[] corners = {-0.5f, -b, 0.5f, -b, 0.5f, b, -0.5f, b}, q = new float[9];
         for (int i = 0; i < 8; i += 2) {
-            float x = corners[i], y = corners[i + 1];
-            float z = WHEEL_R * (1 - c) + y * s, f = WHEEL_EYE / (WHEEL_EYE + z);
-            q[i] = w / 2 + x * f * h;
-            q[i + 1] = h / 2 + (y * c + WHEEL_R * s) * f * h;
+            float x = corners[i], f = SUN_EYE / (SUN_EYE + zc + x * (float) Math.sin(phi));
+            q[i] = cx + x * (float) Math.cos(phi) * f * w;
+            q[i + 1] = cy + corners[i + 1] * f * w;
         }
+        q[8] = Math.max(0.35f, 1f - zc * 0.5f);
         return q;
     }
 

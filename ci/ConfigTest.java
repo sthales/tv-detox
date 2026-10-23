@@ -23,7 +23,7 @@ public class ConfigTest {
         slideDirectionTakesTurns();
         pushPassesBlackBetweenThePictures();
         realTimeUndoesTheAnimationSpeed();
-        roundStartsFlatAndRisesFromBelow();
+        roundRisesOnTheLeftAndSetsOnTheRight();
         bingTitleDropsTheCredit();
         System.out.println("OK");
     }
@@ -182,19 +182,22 @@ public class ConfigTest {
         assert Config.realTime(14000, 0f) == 14000;
     }
 
-    static void roundStartsFlatAndRisesFromBelow() {
+    static void roundRisesOnTheLeftAndSetsOnTheRight() {
         float w = 1920, h = 1080;
-        float[] flat = Config.wheel(0f, w, h);
+        float[] mid = Config.sun(0f, w, h);
         float[] rect = {0, 0, w, 0, w, h, 0, h};
-        for (int i = 0; i < 8; i++) assert Math.abs(flat[i] - rect[i]) < 0.01f : Arrays.toString(flat);
-        float[] next = Config.wheel(Config.WHEEL_STEP, w, h);
-        assert next[1] >= h && next[3] >= h : "the next photo should wait below the screen " + Arrays.toString(next);
-        assert next[4] - next[6] < next[2] - next[0] : "its far (bottom) edge should look smaller " + Arrays.toString(next);
-        assert next[2] - next[0] < w && next[2] - next[0] > 0.85f * w : "subtle, not tiny " + Arrays.toString(next);
-        float[] prev = Config.wheel(-Config.WHEEL_STEP, w, h);
-        assert prev[5] <= 0 && prev[7] <= 0 : "the old photo leaves above the screen " + Arrays.toString(prev);
-        assert Math.abs(prev[5] - (h - next[3])) < 0.5f : "up and down mirror each other";
-        assert Config.WHEEL_STEP * 180 / Math.PI > 20 && Config.WHEEL_STEP * 180 / Math.PI < 30 : "a gentle curve you can still see";
+        for (int i = 0; i < 8; i++) assert Math.abs(mid[i] - rect[i]) < 0.01f : Arrays.toString(mid);
+        assert mid[8] == 1f;
+        float[] rise = Config.sun(-1f, w, h), set = Config.sun(1f, w, h);
+        assert Math.max(rise[2], rise[4]) <= 0f : "waits off the left edge " + Arrays.toString(rise);
+        assert Math.min(set[0], set[6]) >= w : "leaves past the right edge " + Arrays.toString(set);
+        assert rise[1] > 0f && set[3] > 0f : "lower at both ends, like the sun";
+        assert Math.abs(rise[2] + set[0] - w) < 0.5f : "rise and set mirror each other";
+        assert set[5] - set[3] < set[7] - set[1] : "turns away: the leading edge looks shorter " + Arrays.toString(set);
+        assert set[8] < 1f && set[8] >= 0.35f : "darker while it is behind";
+        float[] half = Config.sun(0.5f, w, h);
+        assert half[2] - half[0] < w && half[8] > set[8] : "smaller on the way out " + Arrays.toString(half);
+        assert Config.ROUND == 2000;
     }
 
     static void bingTitleDropsTheCredit() {

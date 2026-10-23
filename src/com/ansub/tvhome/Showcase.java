@@ -70,6 +70,7 @@ final class Showcase extends FrameLayout {
     private float curT, nxtT, curA = 1f, nxtA = 1f, pushP = -1f;
     private int pushDir, pushTurn;
     private final Matrix[] poses = new Matrix[2];
+    private long swap = Config.SLIDE;
     private ValueAnimator fader, mover, pusher;
     private final Ambience ambience;
 
@@ -217,10 +218,11 @@ final class Showcase extends FrameLayout {
             final Bitmap b = source.load(s, w, h);
             ui.post(() -> {
                 if (!running || g != gen) return;
-                int dir = !source.slide() ? 0 : manual ? (step > 0 ? -1 : 1) : Config.slideDir(seed);
-                int turn = source.wheel() ? (step > 0 ? 1 : -1) : 0;
+                int turn = source.slide() && source.wheel() ? (step > 0 ? 1 : -1) : 0;
+                int dir = !source.slide() ? 0 : turn != 0 ? turn : manual ? (step > 0 ? -1 : 1) : Config.slideDir(seed);
+                swap = turn != 0 ? Config.ROUND : Config.SLIDE;
                 if (b != null) show(s, b, seed, dir, turn);
-                ui.postDelayed(advance, b != null ? Math.max(FADE * 2, source.interval()) + (dir != 0 ? Config.SLIDE : 0) : 1000);
+                ui.postDelayed(advance, b != null ? Math.max(FADE * 2, source.interval()) + (dir != 0 ? swap : 0) : 1000);
             });
         });
     }
@@ -230,7 +232,7 @@ final class Showcase extends FrameLayout {
     }
 
     private long life(int dir) {
-        return source.interval() + (dir != 0 ? 2 * Config.SLIDE : FADE * 2);
+        return source.interval() + (dir != 0 ? 2 * swap : FADE * 2);
     }
 
     // The new picture fades in over the old one, drifting from the moment it appears.
@@ -270,13 +272,17 @@ final class Showcase extends FrameLayout {
             final float vh = getHeight() > 0 ? getHeight() : getResources().getDisplayMetrics().heightPixels;
             poses[back] = pose(false, 0f, dir, turn, vw, vh);
             pusher = ValueAnimator.ofFloat(0f, 1f);
-            pusher.setDuration(real(getContext(), Config.SLIDE));
+            pusher.setDuration(real(getContext(), swap));
             pusher.addUpdateListener(an -> {
                 float p = (float) an.getAnimatedValue();
                 poses[o] = pose(true, p, dir, turn, vw, vh);
                 poses[back] = pose(false, p, dir, turn, vw, vh);
-                old.setAlpha(1f - p);
-                v.setAlpha(p);
+                old.setAlpha(alpha(true, p, turn));
+                v.setAlpha(alpha(false, p, turn));
+                if (turn != 0) {
+                    old.setTranslationZ(p < 0.5f ? 1f : 0f);
+                    v.setTranslationZ(p < 0.5f ? 0f : 1f);
+                }
             });
             pusher.addListener(new android.animation.AnimatorListenerAdapter() {
                 @Override public void onAnimationEnd(android.animation.Animator an) {
@@ -284,6 +290,8 @@ final class Showcase extends FrameLayout {
                     old.setImageDrawable(null);
                     poses[0] = poses[1] = null;
                     v.setAlpha(1f);
+                    v.setTranslationZ(1f);
+                    old.setTranslationZ(0f);
                 }
             });
             pusher.start();
@@ -304,7 +312,7 @@ final class Showcase extends FrameLayout {
         nxtA = 0f;
         surface.setContentDescription("slide:" + s.key);
         fader = ValueAnimator.ofFloat(0f, 1f);
-        fader.setDuration(real(getContext(), dir != 0 ? Config.SLIDE : cur == null ? 1 : FADE));
+        fader.setDuration(real(getContext(), dir != 0 ? swap : cur == null ? 1 : FADE));
         fader.addUpdateListener(an -> {
             float p = (float) an.getAnimatedValue();
             nxtA = p;
@@ -312,7 +320,8 @@ final class Showcase extends FrameLayout {
                 pushP = p;
                 pushDir = dir;
                 pushTurn = turn;
-                curA = 1f - p;
+                curA = alpha(true, p, turn);
+                nxtA = alpha(false, p, turn);
             }
             render();
         });
@@ -351,30 +360,35 @@ final class Showcase extends FrameLayout {
         try {
             c = surface.getHolder().lockHardwareCanvas();
             c.drawColor(Color.BLACK);
-            android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG);
-            if (cur != null) {
-                p.setAlpha(Math.round(curA * 255));
-                Matrix m = matrix(cur, curD, curT, curFit, c.getWidth(), c.getHeight());
-                if (pushP >= 0) m.postConcat(pose(true, pushP, pushDir, pushTurn, c.getWidth(), c.getHeight()));
-                c.drawBitmap(cur, m, p);
-            }
-            if (nxt != null) {
-                p.setAlpha(Math.round(nxtA * 255));
-                Matrix m = matrix(nxt, nxtD, nxtT, nxtFit, c.getWidth(), c.getHeight());
-                if (pushP >= 0) m.postConcat(pose(false, pushP, pushDir, pushTurn, c.getWidth(), c.getHeight()));
-                c.drawBitmap(nxt, m, p);
-            }
+            boolean nextBehind = pushP >= 0 && pushTurn != 0 && pushP < 0.5f;
+            if (nextBehind) draw(c, false);
+            draw(c, true);
+            if (!nextBehind) draw(c, false);
         } catch (Exception ignored) {
         } finally {
             if (c != null) try { surface.getHolder().unlockCanvasAndPost(c); } catch (Exception ignored) {}
         }
     }
 
+    private void draw(android.graphics.Canvas c, boolean old) {
+        Bitmap b = old ? cur : nxt;
+        if (b == null) return;
+        android.graphics.Paint p = new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG);
+        p.setAlpha(Math.round((old ? curA : nxtA) * 255));
+        Matrix m = matrix(b, old ? curD : nxtD, old ? curT : nxtT, old ? curFit : nxtFit, c.getWidth(), c.getHeight());
+        if (pushP >= 0) m.postConcat(pose(old, pushP, pushDir, pushTurn, c.getWidth(), c.getHeight()));
+        c.drawBitmap(b, m, p);
+    }
+
+    private static float alpha(boolean old, float p, int turn) {
+        if (turn == 0) return old ? 1f - p : p;
+        return Config.sun(turn * (old ? p : p - 1f), 1f, 1f)[8];
+    }
+
     private static Matrix pose(boolean old, float p, int dir, int turn, float w, float h) {
         Matrix m = new Matrix();
         if (turn != 0) {
-            float angle = (old ? -p : 1f - p) * Config.WHEEL_STEP * turn;
-            m.setPolyToPoly(new float[] {0, 0, w, 0, w, h, 0, h}, 0, Config.wheel(angle, w, h), 0, 4);
+            m.setPolyToPoly(new float[] {0, 0, w, 0, w, h, 0, h}, 0, Config.sun(turn * (old ? p : p - 1f), w, h), 0, 4);
         } else m.setTranslate(Config.push(p, dir)[old ? 0 : 1] * w, 0f);
         return m;
     }
