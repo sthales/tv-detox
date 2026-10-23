@@ -152,6 +152,7 @@ public class MainActivity extends Activity {
     private boolean ambient;
     private Showcase showcase; // the screensaver view, while Back has it up
     private Shelf shelf;
+    private Teaser teaser;
     private LinearLayout npBox;
     private ImageView npArt;
     private TextView npText;
@@ -212,6 +213,8 @@ public class MainActivity extends Activity {
         moveHint.setText(Strings.t("Use the arrows to move it, then press OK"));
         moveHint.setVisibility(View.GONE);
         root.addView(moveHint, at(px(MARGIN), px(ROW1_TOP - 64), -2, -2));
+        teaser = new Teaser(this, regular, semibold);
+        root.addView(teaser, 0, new FrameLayout.LayoutParams(-1, getResources().getDisplayMetrics().heightPixels));
 
         setContentView(scroller);
 
@@ -1289,6 +1292,7 @@ public class MainActivity extends Activity {
         card.setClipToOutline(true);
         card.setFocusable(true);
         card.setTag(key);
+        card.setContentDescription("tile:" + key);
 
         // Banner tiles show their name underneath when focused.
         final TextView caption = banner == null ? null : text(px(24), Color.WHITE, regular);
@@ -1304,6 +1308,7 @@ public class MainActivity extends Activity {
                 focusedKey = key;
                 reveal(y >= bottomRowTop);
             }
+            if (Stremio.PACKAGE.equals(key)) teaser.show(has);
             if (glass) bg.setColor(has ? 0x38FFFFFF : 0x13FFFFFF);
             v.animate().scaleX(has ? 1.1f : 1f).scaleY(has ? 1.1f : 1f).translationZ(has ? px(26) : 0)
                     .setDuration(140).withLayer().start();

@@ -496,6 +496,33 @@ t_nowplaying() {
 }
 focused_desc() { ui | grep -o '<node [^>]*focused="true"[^>]*>' | grep -o 'content-desc="[^"]*"' | head -1 | sed 's/content-desc="\(.*\)"/\1/'; }
 
+to_tile() {
+  home
+  for _ in 1 2 3 4 5 6 7; do sh_tv input keyevent KEYCODE_DPAD_LEFT; done
+  for _ in 1 2 3 4 5 6 7; do [ "$(focused_desc)" = "tile:$1" ] && return 0; sh_tv input keyevent KEYCODE_DPAD_RIGHT; done
+  [ "$(focused_desc)" = "tile:$1" ] || fail "couldn't reach the $1 tile (on: $(focused_desc))"
+}
+in_shelf() { case "$(focused_desc)" in shelf:*) return 0 ;; esac; return 1; }
+t_shelf() {
+  to_tile com.stremio.one; sleep 2
+  ui | grep -q 'content-desc="stremio-teaser"' || fail "focusing Stremio shows no teaser (needs a linked account with something to continue)"
+  sh_tv input keyevent KEYCODE_DPAD_UP; sleep 3
+  in_shelf || fail "Up from Stremio didn't open the shelf (on: $(focused_desc))"
+  first=$(focused_desc)
+  sh_tv input keyevent KEYCODE_DPAD_RIGHT; sleep 1
+  in_shelf && [ "$(focused_desc)" != "$first" ] || fail "Right didn't move along the shelf (on: $(focused_desc))"
+  sh_tv pm disable-user --user 0 com.android.printspooler >/dev/null; sh_tv pm enable com.android.printspooler >/dev/null; sleep 3
+  in_shelf || fail "an app changing while the shelf is open took focus out of it (on: $(focused_desc))"
+  sh_tv input keyevent KEYCODE_BACK; sleep 2
+  [ "$(focused_desc)" = tile:com.stremio.one ] || fail "Back didn't return to the Stremio tile (on: $(focused_desc))"
+  sh_tv input keyevent KEYCODE_DPAD_UP; sleep 3
+  for _ in 1 2; do in_shelf || break; sh_tv input keyevent KEYCODE_DPAD_DOWN; sleep 1; done
+  [ "$(focused_desc)" = tile:com.stremio.one ] || fail "Down past the last row didn't return to the apps (on: $(focused_desc))"
+  sh_tv input keyevent KEYCODE_DPAD_RIGHT; sleep 1
+  ui | grep -q 'content-desc="stremio-teaser"' && fail "the teaser stays after leaving the Stremio tile"
+  home
+}
+
 saver_now() { sh_tv settings get secure screensaver_components; }
 t_dream() {
   sh_tv am start -n $ME/.MainActivity --es tv_saver on --es stamp "d1$(date +%s)" >/dev/null; sleep 2
@@ -594,7 +621,7 @@ restore_all() {
 }
 trap restore_all EXIT
 sh_tv logcat -b crash -c
-for t in baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream pinned autosaver sound rebind nowplaying; do
+for t in baseline keys wallpaper ambient bell hdmi boot apps banner perf rotate delete control rows wallscreen wallmenu settings saver star slidenav dream pinned autosaver sound rebind nowplaying shelf; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$t" ] || continue
   command -v "t_$t" >/dev/null 2>&1 || type "t_$t" >/dev/null 2>&1 || continue
   echo "== $t"
